@@ -93,26 +93,34 @@ std::string describe_score(double score) {
 
 // ---------------------------------------------------------------------------
 // Candidate evaluation
+//
+// Position convention used throughout this file: candidate positions are
+// 0-based indices into the file's line vector.  A candidate `pos` means the
+// signature would occupy file lines [pos, pos + signature.size()).  The
+// 1-based line numbers that users see are derived only when a report is built
+// (`pos + 1`).  Keeping one convention in the search path avoids the classic
+// off-by-one between "the line the model wrote" and "the line in the file".
 // ---------------------------------------------------------------------------
 struct Evaluation {
   int exact = 0;
   int fuzzy = 0;
   int mismatch = 0;
   double score = 0;
-  /// 1-based line number of the first line that neither matched exactly nor
-  /// fuzzily, relative to the window start.
-  int first_mismatch_offset = 0;
+  /// Index (0-based) into the signature of the first line that neither matched
+  /// exactly nor fuzzily; -1 when every line matched.
+  int first_mismatch_index = -1;
 };
 
-Evaluation evaluate_candidate(const std::vector<std::string>& file_lines, int pos,
+Evaluation evaluate_candidate(const std::vector<std::string>& file_lines, std::size_t pos,
                               const std::vector<std::string>& signature,
                               const std::vector<std::string>& normalized_signature,
                               double fuzzy_threshold) {
   Evaluation e;
   const std::size_t n = signature.size();
   for (std::size_t i = 0; i < n; ++i) {
-    const std::size_t idx = static_cast<std::size_t>(pos - 1) + i;
-    const std::string found = idx < file_lines.size() ? normalize_line(file_lines[idx]) : std::string();
+    const std::size_t index = pos + i;
+    const std::string found =
+        index < file_lines.size() ? normalize_line(file_lines[index]) : std::string();
     if (normalized_signature[i] == found) {
       ++e.exact;
       continue;
@@ -122,7 +130,7 @@ Evaluation evaluate_candidate(const std::vector<std::string>& file_lines, int po
       continue;
     }
     ++e.mismatch;
-    if (e.first_mismatch_offset == 0) e.first_mismatch_offset = static_cast<int>(i) + 1;
+    if (e.first_mismatch_index < 0) e.first_mismatch_index = static_cast<int>(i);
   }
   if (n == 0) {
     e.score = 1.0;
@@ -144,11 +152,10 @@ Evaluation evaluate_candidate(const std::vector<std::string>& file_lines, int po
 
 struct SearchOutcome {
   bool found = false;
-  Candidate best;
+  Candidate best;  ///< best.pos is 0-based
   Evaluation best_eval;
-  int declared_pos = 0;
-  /// Largest window radius actually scanned (+/-value); max_drift means the
-  /// global fallback ran.
+  std::size_t declared_pos = 0;  ///< 0-based
+  /// Largest window radius actually scanned; max_drift means the global scan ran.
   int tried_max = 0;
 };
 
@@ -157,40 +164,41 @@ const std::vector<int>& window_ladder() {
   return kWindows;
 }
 
-SearchOutcome search_hunk(const std::vector<std::string>& file_lines, int anchor,
+SearchOutcome search_hunk(const std::vector<std::string>& file_lines, std::size_t anchor,
                           const std::vector<std::string>& signature,
-                          const std::vector<std::string>& normalized_signature, const PatchConfig& cfg,
-                          bool global_fallback) {
+                          const std::vector<std::string>& normalized_signature,
+                          const PatchConfig& cfg, bool global_fallback) {
   SearchOutcome out;
   out.declared_pos = anchor;
 
-  const auto& windows = window_ladder();
-  std::set<int> tried;
+  std::set<std::size_t> tried;
   bool evaluated_any = false;
 
-  auto consider = [&](int pos) {
-    if (pos < 1) return;
-    const std::size_t last_needed = static_cast<std::size_t>(pos - 1) + signature.size();
-    if (signature.empty()) {
-      // Pure insertion: valid anywhere inside the file.
-      if (static_cast<std::size_t>(pos) > file_lines.size() + 1) return;
-    } else if (last_needed > file_lines.size()) {
-      return;
-    }
+  const auto valid = [&](std::size_t pos) {
+    if (pos > file_lines.size()) return false;
+    if (signature.empty()) return true;  // pure insertion: any boundary is fine
+    return pos + signature.size() <= file_lines.size();
+  };
+
+  const auto consider = [&](std::size_t pos) {
+    if (!valid(pos)) return;
     if (!tried.insert(pos).second) return;
     evaluated_any = true;
-    const Evaluation e =
-        evaluate_candidate(file_lines, pos, signature, normalized_signature, cfg.fuzzy_line_threshold);
-    const Candidate cand{pos, e.score, e.exact, e.fuzzy, e.mismatch};
-    const int current_distance = std::abs(out.best.pos - anchor);
-    const int candidate_distance = std::abs(pos - anchor);
+
+    const Evaluation e = evaluate_candidate(file_lines, pos, signature, normalized_signature,
+                                            cfg.fuzzy_line_threshold);
+    const Candidate cand{static_cast<int>(pos), e.score, e.exact, e.fuzzy, e.mismatch};
+    const auto distance = [&](std::size_t p) {
+      return p > anchor ? p - anchor : anchor - p;
+    };
     const bool better =
         !out.found || e.score > out.best.score + 1e-12 ||
         (std::abs(e.score - out.best.score) <= 1e-12 &&
          (e.exact > out.best.exact ||
-          (e.exact == out.best.exact && candidate_distance < current_distance) ||
-          (e.exact == out.best.exact && candidate_distance == current_distance &&
-           pos < out.best.pos)));
+          (e.exact == out.best.exact && distance(pos) < distance(static_cast<std::size_t>(out.best.pos))) ||
+          (e.exact == out.best.exact &&
+           distance(pos) == distance(static_cast<std::size_t>(out.best.pos)) &&
+           pos < static_cast<std::size_t>(out.best.pos))));
     if (better) {
       out.best = cand;
       out.best_eval = e;
@@ -198,25 +206,29 @@ SearchOutcome search_hunk(const std::vector<std::string>& file_lines, int anchor
     }
   };
 
-  for (std::size_t w = 0; w < windows.size(); ++w) {
-    const int radius = windows[w];
+  for (int radius : window_ladder()) {
     out.tried_max = radius;
     if (radius == 0) {
       consider(anchor);
     } else {
-      for (int delta = -radius; delta <= radius; ++delta) consider(anchor + delta);
+      const int low = std::max(0, static_cast<int>(anchor) - radius);
+      const int high = static_cast<int>(anchor) + radius;
+      for (int delta = -radius; delta <= radius; ++delta) {
+        const int candidate = static_cast<int>(anchor) + delta;
+        if (candidate < low || candidate > high) continue;
+        if (candidate < 0) continue;
+        consider(static_cast<std::size_t>(candidate));
+      }
     }
     if (out.found && out.best.score >= 1.0) break;
   }
 
   if (global_fallback) {
-    for (int pos = 1; pos <= static_cast<int>(file_lines.size()) + 1; ++pos) consider(pos);
+    for (std::size_t pos = 0; pos <= file_lines.size(); ++pos) consider(pos);
     out.tried_max = cfg.max_drift;
   }
 
-  if (!evaluated_any) {
-    out.found = false;
-  }
+  if (!evaluated_any) out.found = false;
   return out;
 }
 
@@ -387,8 +399,12 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       ++hunk_counter;
       HunkReport report;
       report.hunk_index = hunk_counter;
-      const int anchor = (hunk.old_start - 1) + delta + 1;  // 1-based
-      report.declared_pos = anchor;
+
+      // 0-based anchor into the *current* line vector, shifted by the net line
+      // change of every hunk applied so far.
+      const long raw_anchor = static_cast<long>(hunk.old_start) - 1 + delta;
+      const std::size_t anchor = raw_anchor < 0 ? 0 : static_cast<std::size_t>(raw_anchor);
+      report.declared_pos = static_cast<int>(anchor) + 1;  // 1-based for humans
 
       std::vector<std::string> normalized_signature;
       normalized_signature.reserve(hunk.old_lines.size());
@@ -396,17 +412,16 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
 
       // --- pure insertion -------------------------------------------------
       if (hunk.old_lines.empty()) {
-        int pos = anchor;
-        if (pos < 1) pos = 1;
-        if (pos > static_cast<int>(lines.size()) + 1) pos = static_cast<int>(lines.size()) + 1;
-        std::vector<std::string> spliced(lines.begin(), lines.begin() + (pos - 1));
+        std::size_t pos = anchor;
+        if (pos > lines.size()) pos = lines.size();
+        std::vector<std::string> spliced(lines.begin(), lines.begin() + static_cast<long>(pos));
         spliced.insert(spliced.end(), hunk.new_lines.begin(), hunk.new_lines.end());
-        spliced.insert(spliced.end(), lines.begin() + (pos - 1), lines.end());
+        spliced.insert(spliced.end(), lines.begin() + static_cast<long>(pos), lines.end());
         lines = std::move(spliced);
         delta += static_cast<int>(hunk.new_lines.size());
 
         report.status = HunkReport::Status::Applied;
-        report.matched_pos = pos;
+        report.matched_pos = static_cast<int>(pos) + 1;
         report.score = 1.0;
         result.reports.push_back(std::move(report));
         continue;
@@ -415,16 +430,17 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       // --- anchored search with widening windows --------------------------
       SearchOutcome outcome =
           search_hunk(lines, anchor, hunk.old_lines, normalized_signature, cfg_, false);
-      if ((!outcome.found || outcome.best.score < cfg_.gate)) {
-        // widen to the whole file, capped by max_drift
-        const SearchOutcome global = search_hunk(lines, anchor, hunk.old_lines,
-                                                 normalized_signature, cfg_, true);
-        outcome.tried_max = cfg_.max_drift;
-        if (global.found &&
-            (!outcome.found || global.best.score > outcome.best.score + 1e-12)) {
+      if (!outcome.found || outcome.best.score < cfg_.gate) {
+        const SearchOutcome global =
+            search_hunk(lines, anchor, hunk.old_lines, normalized_signature, cfg_, true);
+        if (global.found && (!outcome.found || global.best.score > outcome.best.score + 1e-12)) {
+          const int saved_max = outcome.tried_max;
           outcome.best = global.best;
           outcome.best_eval = global.best_eval;
           outcome.found = true;
+          outcome.tried_max = cfg_.max_drift > saved_max ? cfg_.max_drift : saved_max;
+        } else if (outcome.tried_max < cfg_.max_drift) {
+          outcome.tried_max = cfg_.max_drift;  // the global scan did run
         }
       }
 
@@ -432,16 +448,36 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
           outcome.found && outcome.best.score >= cfg_.gate && outcome.best.exact >= 1;
 
       if (passes_gate) {
-        const int pos = outcome.best.pos;  // 1-based first replaced line
-        const int count = static_cast<int>(hunk.old_lines.size());
-        // Elements [pos-1, pos-1+count) are the matched signature.
-        std::vector<std::string> spliced(lines.begin(), lines.begin() + (pos - 1));
-        spliced.insert(spliced.end(), hunk.new_lines.begin(), hunk.new_lines.end());
-        spliced.insert(spliced.end(), lines.begin() + (pos - 1 + count), lines.end());
-        lines = std::move(spliced);
-        delta += static_cast<int>(hunk.new_lines.size()) - count;
+        const std::size_t pos = static_cast<std::size_t>(outcome.best.pos);
+        // The hunk header is authoritative about how many file lines the hunk
+        // consumes: a model that omits context still declares the true count.
+        std::size_t count = hunk.old_count > 0 ? static_cast<std::size_t>(hunk.old_count)
+                                               : hunk.old_lines.size();
+        if (pos + count > lines.size()) count = lines.size() - pos;
 
-        report.matched_pos = pos;
+        // Matching ignores trailing whitespace, so a hunk quoted from a
+        // stripped copy must not silently reformat lines it merely passes
+        // through.  Context lines take the file's own bytes; only genuinely new
+        // ('+') lines become what the diff says.
+        std::vector<std::string> replacement;
+        replacement.reserve(count + 1);
+        for (std::size_t i = 0; i < count; ++i) {
+          const bool is_context = i < hunk.old_lines.size() && i < hunk.new_lines.size() &&
+                                  hunk.new_lines[i] == hunk.old_lines[i];
+          if (is_context) {
+            replacement.push_back(lines[pos + i]);
+          } else if (i < hunk.new_lines.size()) {
+            replacement.push_back(hunk.new_lines[i]);
+          }
+        }
+
+        std::vector<std::string> spliced(lines.begin(), lines.begin() + static_cast<long>(pos));
+        spliced.insert(spliced.end(), replacement.begin(), replacement.end());
+        spliced.insert(spliced.end(), lines.begin() + static_cast<long>(pos + count), lines.end());
+        lines = std::move(spliced);
+        delta += static_cast<int>(replacement.size()) - static_cast<int>(count);
+
+        report.matched_pos = static_cast<int>(pos) + 1;
         report.score = outcome.best.score;
         report.status = (pos == anchor) ? HunkReport::Status::Applied
                                         : HunkReport::Status::FuzzyApplied;
@@ -453,17 +489,17 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       all_applied = false;
       report.status = HunkReport::Status::Failed;
       report.score = outcome.found ? outcome.best.score : 0.0;
-      report.matched_pos = outcome.found ? outcome.best.pos : 0;
+      report.matched_pos = outcome.found ? outcome.best.pos + 1 : 0;
 
       std::vector<Candidate> candidates;
       if (outcome.found) candidates.push_back(outcome.best);
-      // A few more plausible positions, for the LLM's benefit.
-      for (int pos = 1; pos <= static_cast<int>(lines.size()) && candidates.size() < 3; ++pos) {
-        if (outcome.found && pos == outcome.best.pos) continue;
+      for (std::size_t pos = 0; pos <= lines.size() && candidates.size() < 3; ++pos) {
+        if (outcome.found && static_cast<std::size_t>(outcome.best.pos) == pos) continue;
+        if (!hunk.old_lines.empty() && pos + hunk.old_lines.size() > lines.size()) continue;
         const Evaluation e = evaluate_candidate(lines, pos, hunk.old_lines, normalized_signature,
                                                 cfg_.fuzzy_line_threshold);
         if (e.exact + e.fuzzy == 0) continue;
-        candidates.push_back(Candidate{pos, e.score, e.exact, e.fuzzy, e.mismatch});
+        candidates.push_back(Candidate{static_cast<int>(pos), e.score, e.exact, e.fuzzy, e.mismatch});
       }
       std::stable_sort(candidates.begin(), candidates.end(),
                        [](const Candidate& a, const Candidate& b) {
@@ -478,28 +514,29 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       reason.precision(2);
       reason << "score " << report.score << " < gate " << cfg_.gate;
       if (outcome.found) {
-        reason << ". Declared position line " << anchor << " but the closest match is line "
-               << outcome.best.pos << " (score " << describe_score(outcome.best.score) << ", exact "
-               << outcome.best.exact << "/" << hunk.old_lines.size() << ")";
+        reason << ". Declared position line " << report.declared_pos
+               << " but the closest match is line " << report.matched_pos << " (score "
+               << describe_score(outcome.best.score) << ", exact " << outcome.best.exact << "/"
+               << hunk.old_lines.size() << ")";
       }
       reason << ". Window tried: +/-0..+/-" << outcome.tried_max << " plus global scan";
-      if (outcome.found && outcome.best_eval.first_mismatch_offset > 0) {
+      if (outcome.found && outcome.best_eval.first_mismatch_index >= 0) {
         const std::size_t sig_index =
-            static_cast<std::size_t>(outcome.best_eval.first_mismatch_offset) - 1;
-        const std::size_t file_index =
-            static_cast<std::size_t>(outcome.best.pos - 1) + sig_index;
-        const std::string expected = hunk.old_lines[sig_index];
+            static_cast<std::size_t>(outcome.best_eval.first_mismatch_index);
+        const std::size_t file_index = static_cast<std::size_t>(outcome.best.pos) + sig_index;
+        const std::string expected = sig_index < hunk.old_lines.size() ? hunk.old_lines[sig_index]
+                                                                       : std::string();
         const std::string found =
             file_index < lines.size() ? lines[file_index] : std::string("<end of file>");
-        reason << ". Context mismatch: expected line " << (outcome.best.pos + static_cast<int>(sig_index))
-               << " to contain '" << format_line(expected) << "' but the file has '"
-               << format_line(found) << "'.";
+        reason << ". Context mismatch: expected line " << (file_index + 1) << " to contain '"
+               << format_line(expected) << "' but the file has '" << format_line(found) << "'.";
       } else if (!outcome.found) {
-        const std::string expected = hunk.old_lines.empty() ? std::string() : hunk.old_lines.front();
+        const std::string expected =
+            hunk.old_lines.empty() ? std::string() : hunk.old_lines.front();
         reason << ". No position in the file can hold the hunk context; expected first line '"
                << format_line(expected) << "'.";
       }
-      if (passes_gate == false && outcome.found && outcome.best.exact == 0) {
+      if (outcome.found && outcome.best.exact == 0) {
         reason << ". The best candidate matched only fuzzily (exact 0), which is below the "
                   "required exact >= 1.";
       }
