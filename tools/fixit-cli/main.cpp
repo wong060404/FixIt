@@ -304,9 +304,7 @@ int main(int argc, char** argv) {
 
   std::unique_ptr<fixit::Llm> llm;
   if (options.llm == "mock") {
-    auto mock = std::make_unique<fixit::MockLlm>();
-    mock->set_workdir(workdir);
-    llm = std::move(mock);
+    llm = std::make_unique<fixit::MockLlm>();
   } else {
     if (!fixit::openai_tls_available() && options.base_url.rfind("https://", 0) == 0) {
       std::cerr << "fixit: this build has no TLS support; point --base-url at an http:// "
@@ -342,8 +340,25 @@ int main(int argc, char** argv) {
     }
 
     if (event.kind == fixit::Agent::Event::Kind::Compile) {
-      const int heading = event.round == 0 ? 1 : event.round;
       const std::string fingerprint = fingerprint_of(event.compile);
+      if (event.verification) {
+        // Terminal confirmation: report the outcome without pretending a new
+        // repair round happened.
+        if (fingerprint == last_fingerprint) return;
+        last_fingerprint = fingerprint;
+        std::cout << "$ " << options.compiler << " -fsyntax-only " << display_file << "\n";
+        if (event.compile.clean()) {
+          std::cout << "  " << green("✓ clean") << "\n";
+        } else {
+          const std::size_t errors = event.compile.error_count();
+          std::cout << "  " << red("✗ " + std::to_string(errors) +
+                                   (errors == 1 ? " error" : " errors"))
+                    << "\n";
+          print_errors(event.compile, "    ");
+        }
+        return;
+      }
+      const int heading = event.round == 0 ? 1 : event.round;
       if (heading == printed_round && fingerprint == last_fingerprint) return;
       if (heading != printed_round) {
         printed_round = heading;

@@ -1,0 +1,4 @@
+src/foo.cpp:3:23: error: use of undeclared identifier 'unknown_identifier'
+    3 | int broken() { return unknown_identifier; }
+      |                       ^
+1 error generated.

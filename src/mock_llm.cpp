@@ -148,7 +148,7 @@ int last_include_line(const std::vector<std::string>& lines) {
 
 MockLlm::MockLlm() = default;
 
-void MockLlm::set_workdir(std::string workdir) { g_workdir = std::move(workdir); }
+void MockLlm::set_workspace(const std::string& workdir) { g_workdir = workdir; }
 
 LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vector<ToolSpec>& tools) {
   (void)tools;

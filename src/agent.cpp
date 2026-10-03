@@ -268,12 +268,13 @@ void Agent::set_progress(ProgressFn fn) {
   };
 }
 
-void Agent::emit_compile(int round, const CompileResult& result) {
+void Agent::emit_compile(int round, const CompileResult& result, bool verification) {
   if (observer_) {
     Event event;
     event.kind = Event::Kind::Compile;
     event.round = round;
     event.compile = result;
+    event.verification = verification;
     observer_(event);
   }
 }
@@ -282,7 +283,13 @@ Agent::Agent(ToolRegistry tools, std::unique_ptr<Llm> llm, Compiler compiler, st
     : tools_(std::move(tools)),
       llm_(std::move(llm)),
       compiler_(std::move(compiler)),
-      workdir_(std::move(workdir)) {}
+      workdir_(std::move(workdir)) {
+  // A backend that resolves files itself gets the same working directory the
+  // tools use, so behaviour cannot diverge between the two.
+  if (auto* aware = dynamic_cast<WorkspaceAware*>(llm_.get()); aware != nullptr) {
+    aware->set_workspace(workdir_);
+  }
+}
 
 AgentResult Agent::run(const std::string& task, int max_iterations) {
   AgentResult result;
@@ -374,8 +381,8 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
                                nlohmann::json::array(), nlohmann::json()});
     if (compiled.clean()) {
       result.success = true;
-      result.iterations = round + 1;  // the verification round the demo counts
-      emit_compile(round + 1, compiled);
+      result.iterations = round;  // model rounds, i.e. the trace length
+      emit_compile(round, compiled, /*verification=*/true);
       break;
     }
     if (response.tool_calls.empty()) break;  // nothing further to try

@@ -1,0 +1,16 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "src/foo.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 3,
+      "col": 23,
+      "level": "error",
+      "message": "'unknown_identifier' was not declared in this scope",
+      "context_line": "3 |  int broken() { return unknown_identifier; }"
+    }
+  ]
+}

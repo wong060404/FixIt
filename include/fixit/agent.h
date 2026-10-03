@@ -70,6 +70,16 @@ class Llm {
                            const std::vector<ToolSpec>& tools) = 0;
 };
 
+/// Optional capability: a backend that has to read project files itself (the
+/// mock inspects the real source to build its diff) implements this so the
+/// agent can hand it the working directory it was constructed with.  The CLI
+/// never has to know.
+class WorkspaceAware {
+ public:
+  virtual ~WorkspaceAware() = default;
+  virtual void set_workspace(const std::string& workdir) = 0;
+};
+
 /// OpenAI-compatible /v1/chat/completions client (non-streaming).
 class OpenAiLlm : public Llm {
  public:
@@ -92,13 +102,14 @@ bool openai_tls_available();
 /// Rule-based, fully deterministic, offline stand-in for an LLM.
 /// Rules and the intentional +1 line drift are documented in the README and in
 /// docs/decisions.md.
-class MockLlm : public Llm {
+class MockLlm : public Llm, public WorkspaceAware {
  public:
   MockLlm();
 
   /// Directory used to resolve the files named in diagnostics, mirroring the
   /// workdir the patch tool uses.  Empty means "current process directory".
-  void set_workdir(std::string workdir);
+  /// The agent sets this automatically.
+  void set_workspace(const std::string& workdir) override;
   LlmResponse chat(const std::vector<Message>& messages,
                    const std::vector<ToolSpec>& tools) override;
 };
@@ -132,6 +143,9 @@ class Agent {
     int round = 0;  ///< 1-based agent round; 0 for the initial compile
     CompileResult compile;  ///< set for Kind::Compile
     PatchResult patch;      ///< set for Kind::Patch
+    /// The terminal compile that confirms (or rejects) success.  Front ends
+    /// print it as the outcome line, not as another repair round.
+    bool verification = false;
   };
   using Observer = std::function<void(const Event&)>;
   void set_observer(Observer fn) { observer_ = std::move(fn); }
@@ -141,7 +155,7 @@ class Agent {
   void set_progress(ProgressFn fn);
 
  private:
-  void emit_compile(int round, const CompileResult& result);
+  void emit_compile(int round, const CompileResult& result, bool verification = false);
 
   ToolRegistry tools_;
   std::unique_ptr<Llm> llm_;

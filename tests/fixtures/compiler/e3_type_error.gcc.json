@@ -1,0 +1,23 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "e3_type_error.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 13,
+      "col": 15,
+      "level": "error",
+      "message": "could not convert 'value' from 'int' to 'const std::string&'",
+      "context_line": "13 |    int words = count_words(value);"
+    },
+    {
+      "line": 14,
+      "col": 15,
+      "level": "error",
+      "message": "'count_missing_words' was not declared in this scope",
+      "context_line": "14 |    int extra = count_missing_words(value);"
+    }
+  ]
+}

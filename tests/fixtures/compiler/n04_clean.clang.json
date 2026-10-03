@@ -1,0 +1,8 @@
+{
+  "dialect": "clang-json",
+  "compiler": "clang",
+  "source": "clean.cpp",
+  "recorded": "machine",
+  "output_format": "text",
+  "expect": []
+}

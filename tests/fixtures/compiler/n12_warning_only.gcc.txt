@@ -1,0 +1,6 @@
+warning_only.cpp:6:21: warning: 'int old_api()' is deprecated: use newer_api() instead [-Wdeprecated-declarations]
+    6 | int main() { return old_api(); }
+      |                     ^~~~~~~
+warning_only.cpp:4:47: note: declared here
+    4 | [[deprecated("use newer_api() instead")]] int old_api() { return 0; }
+      |                                               ^~~~~~~

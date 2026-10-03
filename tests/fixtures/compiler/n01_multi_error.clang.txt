@@ -1,0 +1,7 @@
+multi_error.cpp:5:3: error: use of undeclared identifier 'missing_symbol_a'
+    5 |   missing_symbol_a();
+      |   ^
+multi_error.cpp:6:3: error: use of undeclared identifier 'missing_symbol_b'
+    6 |   missing_symbol_b();
+      |   ^
+2 errors generated.

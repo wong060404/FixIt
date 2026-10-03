@@ -1,0 +1,21 @@
+{
+  "dialect": "clang-json",
+  "compiler": "clang",
+  "source": "multi_error.cpp",
+  "recorded": "synthetic",
+  "output_format": "json",
+  "expect": [
+    {
+      "line": 5,
+      "col": 3,
+      "level": "error",
+      "message": "use of undeclared identifier 'missing_symbol_a'"
+    },
+    {
+      "line": 6,
+      "col": 3,
+      "level": "error",
+      "message": "use of undeclared identifier 'missing_symbol_b'"
+    }
+  ]
+}

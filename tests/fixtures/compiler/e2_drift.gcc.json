@@ -1,0 +1,44 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "e2_drift.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 47,
+      "col": 12,
+      "level": "error",
+      "message": "expected ';' before 'return'",
+      "context_line": "47 |    int n = 3"
+    },
+    {
+      "line": 52,
+      "col": 8,
+      "level": "error",
+      "message": "'vector' in namespace 'std' does not name a template type",
+      "context_line": "52 |    std::vector<std::string> words;"
+    },
+    {
+      "line": 52,
+      "col": 26,
+      "level": "error",
+      "message": "expected ')' before '>' token",
+      "context_line": "52 |    std::vector<std::string> words;"
+    },
+    {
+      "line": 52,
+      "col": 28,
+      "level": "error",
+      "message": "'words' was not declared in this scope",
+      "context_line": "52 |    std::vector<std::string> words;"
+    },
+    {
+      "line": 53,
+      "col": 3,
+      "level": "error",
+      "message": "'words' was not declared in this scope",
+      "context_line": "53 |    words.push_back(\"x\");"
+    }
+  ]
+}

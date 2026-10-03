@@ -1,0 +1,16 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "caret_context.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 5,
+      "col": 27,
+      "level": "error",
+      "message": "invalid conversion from 'const char*' to 'int' [-fpermissive]",
+      "context_line": "5 |    int result = compute(1, \"two\");"
+    }
+  ]
+}

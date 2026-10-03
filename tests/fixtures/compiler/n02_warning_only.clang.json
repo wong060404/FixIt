@@ -1,0 +1,16 @@
+{
+  "dialect": "clang-json",
+  "compiler": "clang",
+  "source": "warning_only.cpp",
+  "recorded": "machine",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 6,
+      "col": 21,
+      "level": "warning",
+      "message": "'old_api' is deprecated: use newer_api() instead [-Wdeprecated-declarations]",
+      "context_line": "6 |  int main() { return old_api(); }"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "long_message.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 2,
+      "col": 15,
+      "level": "error",
+      "message": "static assertion failed: fixit fixture: this deliberately enormous diagnostic message exists so that the parser's message capture can be compared character for character; any truncation, line folding or re-wrapping by the parser would be obvious here",
+      "context_line": "2 |  static_assert(sizeof(void*) == 16,"
+    }
+  ]
+}

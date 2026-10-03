@@ -1,0 +1,6 @@
+caret_context.cpp:5:27: error: invalid conversion from 'const char*' to 'int' [-fpermissive]
+    5 |   int result = compute(1, "two");
+      |                           ^~~~~
+caret_context.cpp:2:22: note: initializing argument 2 of 'int compute(int, int)'
+    2 | int compute(int lhs, int rhs) { return lhs + rhs; }
+      |                      ^~~~~~~

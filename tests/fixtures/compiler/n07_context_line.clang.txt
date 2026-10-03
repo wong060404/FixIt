@@ -1,0 +1,17 @@
+[
+  {
+    "level": "error",
+    "message": "cannot initialize a variable of type 'int' with an lvalue of type 'const char[5]'",
+    "location": { "file": "context_line.cpp", "line": 3, "column": 7 },
+    "source": ["  int value = ", "\"text\"", ";"],
+    "spans": [
+      {
+        "file": "context_line.cpp",
+        "line": 3,
+        "column": 7,
+        "start": { "line": 3, "column": 7 },
+        "end": { "line": 3, "column": 12 }
+      }
+    ]
+  }
+]

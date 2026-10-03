@@ -1,0 +1,16 @@
+{
+  "dialect": "clang-json",
+  "compiler": "clang",
+  "source": "src/foo.cpp",
+  "recorded": "machine",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 3,
+      "col": 23,
+      "level": "error",
+      "message": "use of undeclared identifier 'unknown_identifier'",
+      "context_line": "3 |  int broken() { return unknown_identifier; }"
+    }
+  ]
+}

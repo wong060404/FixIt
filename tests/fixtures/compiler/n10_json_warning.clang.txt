@@ -1,0 +1,23 @@
+[
+  {
+    "level": "warning",
+    "message": "'old_api' is deprecated: use newer_api() instead",
+    "location": { "file": "warning_only.cpp", "line": 6, "column": 21 },
+    "spans": [
+      {
+        "file": "warning_only.cpp",
+        "line": 6,
+        "column": 21,
+        "start": { "line": 6, "column": 21 },
+        "end": { "line": 6, "column": 28 }
+      }
+    ],
+    "children": [
+      {
+        "level": "note",
+        "message": "'old_api' has been explicitly marked deprecated here",
+        "location": { "file": "warning_only.cpp", "line": 4, "column": 3 }
+      }
+    ]
+  }
+]

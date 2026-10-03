@@ -1,0 +1,16 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "col1_error.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 3,
+      "col": 1,
+      "level": "error",
+      "message": "expected declaration before '}' token",
+      "context_line": "3 |  }"
+    }
+  ]
+}

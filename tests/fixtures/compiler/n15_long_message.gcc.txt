@@ -1,0 +1,3 @@
+long_message.cpp:2:15: error: static assertion failed: fixit fixture: this deliberately enormous diagnostic message exists so that the parser's message capture can be compared character for character; any truncation, line folding or re-wrapping by the parser would be obvious here
+    2 | static_assert(sizeof(void*) == 16,
+      |               ^~~~~~~~~~~

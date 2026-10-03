@@ -1,5 +1,15 @@
-e1_missing_include.cpp:16:12: error: expected ';' at end of declaration
-   16 |   int n = 3
+examples/buggy/e1_missing_include.cpp:10:12: error: expected ';' before 'return'
+   10 |   int n = 3
       |            ^
-      |            ;
-1 error generated.
+examples/buggy/e1_missing_include.cpp:14:19: error: 'vector' in namespace 'std' does not name a template type
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                   ^~~~~~
+examples/buggy/e1_missing_include.cpp:14:37: error: expected ')' before '>' token
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                                     ^
+examples/buggy/e1_missing_include.cpp:14:40: error: 'words' was not declared in this scope
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                                        ^~~~~
+examples/buggy/e1_missing_include.cpp:14:47: error: expected primary-expression before 'const'
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                                               ^~~~~

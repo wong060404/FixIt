@@ -1,0 +1,16 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "missing_header.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 2,
+      "col": 10,
+      "level": "error",
+      "message": "fixit_no_such_header.h: No such file or directory",
+      "context_line": "2 |  #include \"fixit_no_such_header.h\""
+    }
+  ]
+}

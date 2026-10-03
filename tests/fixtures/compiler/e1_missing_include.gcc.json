@@ -1,0 +1,44 @@
+{
+  "dialect": "gcc",
+  "compiler": "gcc",
+  "source": "e1_missing_include.cpp",
+  "recorded": "synthetic",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 10,
+      "col": 12,
+      "level": "error",
+      "message": "expected ';' before 'return'",
+      "context_line": "10 |    int n = 3"
+    },
+    {
+      "line": 14,
+      "col": 19,
+      "level": "error",
+      "message": "'vector' in namespace 'std' does not name a template type",
+      "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {"
+    },
+    {
+      "line": 14,
+      "col": 37,
+      "level": "error",
+      "message": "expected ')' before '>' token",
+      "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {"
+    },
+    {
+      "line": 14,
+      "col": 40,
+      "level": "error",
+      "message": "'words' was not declared in this scope",
+      "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {"
+    },
+    {
+      "line": 14,
+      "col": 47,
+      "level": "error",
+      "message": "expected primary-expression before 'const'",
+      "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {"
+    }
+  ]
+}

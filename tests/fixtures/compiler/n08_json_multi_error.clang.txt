@@ -1,0 +1,35 @@
+[
+  {
+    "level": "error",
+    "message": "use of undeclared identifier 'missing_symbol_a'",
+    "location": { "file": "multi_error.cpp", "line": 5, "column": 3 },
+    "spans": [
+      {
+        "file": "multi_error.cpp",
+        "line": 5,
+        "column": 3,
+        "start": { "line": 5, "column": 3 },
+        "end": { "line": 5, "column": 18 }
+      }
+    ]
+  },
+  {
+    "level": "error",
+    "message": "use of undeclared identifier 'missing_symbol_b'",
+    "location": { "file": "multi_error.cpp", "line": 6, "column": 3 },
+    "spans": [
+      {
+        "file": "multi_error.cpp",
+        "line": 6,
+        "column": 3,
+        "start": { "line": 6, "column": 3 },
+        "end": { "line": 6, "column": 18 }
+      }
+    ]
+  },
+  {
+    "level": "note",
+    "message": "compilation resumed after the previous error",
+    "location": { "file": "multi_error.cpp", "line": 7, "column": 1 }
+  }
+]

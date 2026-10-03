@@ -1,5 +1,15 @@
-e2_drift.cpp:54:12: error: expected ';' at end of declaration
-   54 |   int n = 3
+examples/buggy/e2_drift.cpp:47:12: error: expected ';' before 'return'
+   47 |   int n = 3
       |            ^
-      |            ;
-1 error generated.
+examples/buggy/e2_drift.cpp:52:8: error: 'vector' in namespace 'std' does not name a template type
+   52 |   std::vector<std::string> words;
+      |        ^~~~~~
+examples/buggy/e2_drift.cpp:52:26: error: expected ')' before '>' token
+   52 |   std::vector<std::string> words;
+      |                          ^
+examples/buggy/e2_drift.cpp:52:28: error: 'words' was not declared in this scope
+   52 |   std::vector<std::string> words;
+      |                            ^~~~~
+examples/buggy/e2_drift.cpp:53:3: error: 'words' was not declared in this scope
+   53 |   words.push_back("x");
+      |   ^

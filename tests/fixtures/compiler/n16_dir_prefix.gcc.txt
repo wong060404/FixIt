@@ -1,0 +1,3 @@
+src/foo.cpp:3:23: error: 'unknown_identifier' was not declared in this scope
+    3 | int broken() { return unknown_identifier; }
+      |                       ^~~~~~~~~~~~~~~~~~

@@ -1,0 +1,16 @@
+{
+  "dialect": "clang-json",
+  "compiler": "clang",
+  "source": "missing_header.cpp",
+  "recorded": "machine",
+  "output_format": "text",
+  "expect": [
+    {
+      "line": 2,
+      "col": 10,
+      "level": "error",
+      "message": "'fixit_no_such_header.h' file not found",
+      "context_line": "2 |  #include \"fixit_no_such_header.h\""
+    }
+  ]
+}

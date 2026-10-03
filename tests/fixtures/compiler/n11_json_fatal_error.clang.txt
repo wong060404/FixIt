@@ -1,0 +1,16 @@
+[
+  {
+    "level": "fatal error",
+    "message": "'fixit_no_such_header.h' file not found",
+    "location": { "file": "missing_header.cpp", "line": 2, "column": 10 },
+    "spans": [
+      {
+        "file": "missing_header.cpp",
+        "line": 2,
+        "column": 10,
+        "start": { "line": 2, "column": 10 },
+        "end": { "line": 2, "column": 34 }
+      }
+    ]
+  }
+]

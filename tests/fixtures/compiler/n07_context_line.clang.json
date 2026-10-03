@@ -1,0 +1,16 @@
+{
+  "dialect": "clang-json",
+  "compiler": "clang",
+  "source": "context_line.cpp",
+  "recorded": "synthetic",
+  "output_format": "json",
+  "expect": [
+    {
+      "line": 3,
+      "col": 7,
+      "level": "error",
+      "message": "cannot initialize a variable of type 'int' with an lvalue of type 'const char[5]'",
+      "context_line": "3 |   int value = \"text\";"
+    }
+  ]
+}
