@@ -367,12 +367,7 @@ int main(int argc, char** argv) {
     return os.str();
   };
   agent.set_observer([&](const fixit::Agent::Event& event) {
-    if (!options.verbose) {
-      if (event.kind == fixit::Agent::Event::Kind::Patch) {
-        for (const fixit::HunkReport& report : event.patch.reports) classify(report, metrics);
-      }
-      return;
-    }
+    if (!options.verbose) return;  // metrics are collected after the run
 
     if (event.kind == fixit::Agent::Event::Kind::Compile) {
       const std::string fingerprint = fingerprint_of(event.compile);
@@ -447,11 +442,10 @@ int main(int argc, char** argv) {
   const fixit::AgentResult result = agent.run(display_file, options.iterations);
   cleanup_scratch();
 
-  if (!options.verbose) {
-    for (const auto& [round, patch] : result.patches) {
-      (void)round;
-      for (const fixit::HunkReport& report : patch.reports) classify(report, metrics);
-    }
+  // Single source of truth for the counters: the patches the loop recorded.
+  for (const auto& [round, patch] : result.patches) {
+    (void)round;
+    for (const fixit::HunkReport& report : patch.reports) classify(report, metrics);
   }
 
   if (!options.metrics.empty()) {
