@@ -1,0 +1,10 @@
+examples/buggy/e3_type_error.cpp:13:15: error: no matching function for call to 'count_words'
+   13 |   int words = count_words(value);
+      |               ^~~~~~~~~~~
+examples/buggy/e3_type_error.cpp:7:5: note: candidate function not viable: no known conversion from 'int' to 'const std::string' (aka 'const basic_string<char>') for 1st argument
+    7 | int count_words(const std::string& text) {
+      |     ^           ~~~~~~~~~~~~~~~~~~~~~~~
+examples/buggy/e3_type_error.cpp:14:15: error: use of undeclared identifier 'count_missing_words'
+   14 |   int extra = count_missing_words(value);
+      |               ^
+2 errors generated.

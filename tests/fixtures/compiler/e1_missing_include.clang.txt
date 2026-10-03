@@ -1,0 +1,18 @@
+examples/buggy/e1_missing_include.cpp:10:12: error: expected ';' at end of declaration
+   10 |   int n = 3
+      |            ^
+      |            ;
+examples/buggy/e1_missing_include.cpp:14:19: error: no member named 'vector' in namespace 'std'
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |              ~~~~~^
+examples/buggy/e1_missing_include.cpp:14:37: error: expected '(' for function-style cast or type construction
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                          ~~~~~~~~~~~^
+examples/buggy/e1_missing_include.cpp:14:40: error: use of undeclared identifier 'words'
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                                        ^
+examples/buggy/e1_missing_include.cpp:14:47: error: expected expression
+   14 | int add_word(std::vector<std::string>& words, const std::string& word) {
+      |                                               ^
+fatal error: too many errors emitted, stopping now [-ferror-limit=]
+6 errors generated.

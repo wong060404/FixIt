@@ -1,0 +1,5 @@
+e2_drift.cpp:54:12: error: expected ';' at end of declaration
+   54 |   int n = 3
+      |            ^
+      |            ;
+1 error generated.

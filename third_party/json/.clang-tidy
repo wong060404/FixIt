@@ -1,0 +1,94 @@
+# bugprone-use-after-move (hicpp-invalid-access-moved is its alias) still flags
+# the basic_json move constructor, which forwards the whole object to its base
+# class (#5724), and two forwards in the error-message construction of
+# at(KeyType&&) (json.hpp, both overloads: find(std::forward<KeyType>(key))
+# followed by string_t(std::forward<KeyType>(key)) in the throw), which #5689
+# rewrites. Re-enable both checks once those changes have landed.
+# portability-avoid-pragma-once: kept disabled on purpose. #pragma once is accepted
+# by every supported compiler, and tools/amalgamate/amalgamate.py strips it from
+# single_include, so there is nothing left to fix here.
+
+Checks: '*,
+
+         -bugprone-use-after-move,
+         -hicpp-invalid-access-moved,
+
+         -altera-id-dependent-backward-branch,
+         -altera-struct-pack-align,
+         -altera-unroll-loops,
+         -android-cloexec-fopen,
+         -boost-use-ranges,
+         -bugprone-easily-swappable-parameters,
+         -cert-err58-cpp,
+         -clang-analyzer-webkit.NoUncountedMemberChecker,
+         -concurrency-mt-unsafe,
+         -cppcoreguidelines-avoid-const-or-ref-data-members,
+         -cppcoreguidelines-avoid-do-while,
+         -cppcoreguidelines-avoid-goto,
+         -cppcoreguidelines-avoid-magic-numbers,
+         -cppcoreguidelines-avoid-non-const-global-variables,
+         -cppcoreguidelines-macro-usage,
+         -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+         -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+         -cppcoreguidelines-pro-bounds-constant-array-index,
+         -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+         -cppcoreguidelines-pro-type-reinterpret-cast,
+         -cppcoreguidelines-pro-type-union-access,
+         -cppcoreguidelines-rvalue-reference-param-not-moved,
+         -cppcoreguidelines-virtual-class-destructor,
+         -fuchsia-default-arguments-calls,
+         -fuchsia-default-arguments-declarations,
+         -fuchsia-overloaded-operator,
+         -google-explicit-constructor,
+         -google-readability-function-size,
+         -google-runtime-float,
+         -google-runtime-int,
+         -hicpp-avoid-goto,
+         -hicpp-explicit-conversions,
+         -hicpp-function-size,
+         -hicpp-no-array-decay,
+         -hicpp-no-assembler,
+         -hicpp-signed-bitwise,
+         -hicpp-uppercase-literal-suffix,
+         -llvm-header-guard,
+         -llvm-include-order,
+         -llvm-prefer-static-over-anonymous-namespace,
+         -llvm-use-ranges,
+         -llvmlibc-*,
+         -misc-use-anonymous-namespace,
+         -misc-confusable-identifiers,
+         -misc-include-cleaner,
+         -misc-no-recursion,
+         -misc-non-private-member-variables-in-classes,
+         -modernize-concat-nested-namespaces,
+         -modernize-type-traits,
+         -modernize-use-constraints,
+         -modernize-use-designated-initializers,
+         -modernize-use-nodiscard,
+         -modernize-use-ranges,
+         -modernize-use-std-numbers,
+         -modernize-use-trailing-return-type,
+         -performance-enum-size,
+         -portability-avoid-pragma-once,
+         -readability-function-cognitive-complexity,
+         -readability-function-size,
+         -readability-identifier-length,
+         -readability-magic-numbers,
+         -readability-redundant-access-specifiers,
+         -readability-redundant-parentheses,
+         -readability-redundant-typename,
+         -readability-simplify-boolean-expr,
+         -readability-uppercase-literal-suffix,
+         -readability-use-concise-preprocessor-directives'
+
+CheckOptions:
+  - key: hicpp-special-member-functions.AllowSoleDefaultDtor
+    value: 1
+  # clang-tidy 22.1 extended this check to classes and enums; the test files
+  # define many such helper types at namespace scope, which is harmless
+  - key: misc-use-internal-linkage.AnalyzeTypes
+    value: false
+
+WarningsAsErrors: '*'
+
+HeaderFilterRegex: '.*hpp$'

@@ -1,0 +1,2492 @@
+//     __ _____ _____ _____
+//  __|  |   __|     |   | |  JSON for Modern C++ (supporting code)
+// |  |  |__   |  |  | | | |  version 3.12.0
+// |_____|_____|_____|_|___|  https://github.com/nlohmann/json
+//
+// SPDX-FileCopyrightText: 2013-2026 Niels Lohmann <https://nlohmann.me>
+// SPDX-License-Identifier: MIT
+
+#include "doctest_compatibility.h"
+
+#include <nlohmann/json.hpp>
+using nlohmann::json;
+#ifdef JSON_TEST_NO_GLOBAL_UDLS
+    using namespace nlohmann::literals; // NOLINT(google-build-using-namespace)
+#endif
+
+#include <cstdint> // SIZE_MAX, UINT32_MAX
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <limits>
+#include <set>
+#include "make_test_data_available.hpp"
+#include "round_trip_corpus.hpp"
+#include "test_utils.hpp"
+#include "sax_countdown.hpp"
+using utils::SaxCountdown;
+
+
+TEST_CASE("MessagePack")
+{
+    SECTION("individual values")
+    {
+        SECTION("discarded")
+        {
+            // discarded values are not serialized
+            json const j = json::value_t::discarded;
+            const auto result = json::to_msgpack(j);
+            CHECK(result.empty());
+        }
+
+        SECTION("null")
+        {
+            json const j = nullptr;
+            std::vector<uint8_t> const expected = {0xc0};
+            const auto result = json::to_msgpack(j);
+            CHECK(result == expected);
+
+            // roundtrip
+            CHECK(json::from_msgpack(result) == j);
+            CHECK(json::from_msgpack(result, true, false) == j);
+        }
+
+        SECTION("boolean")
+        {
+            SECTION("true")
+            {
+                json const j = true;
+                std::vector<uint8_t> const expected = {0xc3};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("false")
+            {
+                json const j = false;
+                std::vector<uint8_t> const expected = {0xc2};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+        }
+
+        SECTION("number")
+        {
+            SECTION("signed")
+            {
+                SECTION("-32..-1 (negative fixnum)")
+                {
+                    for (auto i = -32; i <= -1; ++i)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            static_cast<uint8_t>(i)
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 1);
+
+                        // check individual bytes
+                        CHECK(static_cast<int8_t>(result[0]) == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("0..127 (positive fixnum)")
+                {
+                    for (size_t i = 0; i <= 127; ++i)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json j = -1;
+                        j.get_ref<json::number_integer_t&>() = static_cast<json::number_integer_t>(i);
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected{static_cast<uint8_t>(i)};
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 1);
+
+                        // check individual bytes
+                        CHECK(result[0] == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("128..255 (int 8)")
+                {
+                    for (size_t i = 128; i <= 255; ++i)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json j = -1;
+                        j.get_ref<json::number_integer_t&>() = static_cast<json::number_integer_t>(i);
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xcc,
+                            static_cast<uint8_t>(i),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 2);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xcc);
+                        auto const restored = static_cast<uint8_t>(result[1]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("256..65535 (int 16)")
+                {
+                    for (size_t i = 256; i <= 65535; i = utils::next_integer_sample(i, static_cast<size_t>(65535), static_cast<size_t>(7)))
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json j = -1;
+                        j.get_ref<json::number_integer_t&>() = static_cast<json::number_integer_t>(i);
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xcd,
+                            static_cast<uint8_t>((i >> 8) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 3);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xcd);
+                        auto const restored = static_cast<uint16_t>((static_cast<uint8_t>(result[1]) * 256) + static_cast<uint8_t>(result[2]));
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("65536..4294967295 (int 32)")
+                {
+                    for (uint32_t i :
+                            {
+                                65536u, 77777u, 1048576u, 4294967295u
+                            })
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json j = -1;
+                        j.get_ref<json::number_integer_t&>() = static_cast<json::number_integer_t>(i);
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xce,
+                            static_cast<uint8_t>((i >> 24) & 0xff),
+                            static_cast<uint8_t>((i >> 16) & 0xff),
+                            static_cast<uint8_t>((i >> 8) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 5);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xce);
+                        uint32_t const restored = (static_cast<uint32_t>(result[1]) << 030) +
+                                                  (static_cast<uint32_t>(result[2]) << 020) +
+                                                  (static_cast<uint32_t>(result[3]) << 010) +
+                                                  static_cast<uint32_t>(result[4]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("4294967296..9223372036854775807 (int 64)")
+                {
+                    for (uint64_t i :
+                            {
+                                4294967296LU, 9223372036854775807LU
+                            })
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json j = -1;
+                        j.get_ref<json::number_integer_t&>() = static_cast<json::number_integer_t>(i);
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xcf,
+                            static_cast<uint8_t>((i >> 070) & 0xff),
+                            static_cast<uint8_t>((i >> 060) & 0xff),
+                            static_cast<uint8_t>((i >> 050) & 0xff),
+                            static_cast<uint8_t>((i >> 040) & 0xff),
+                            static_cast<uint8_t>((i >> 030) & 0xff),
+                            static_cast<uint8_t>((i >> 020) & 0xff),
+                            static_cast<uint8_t>((i >> 010) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 9);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xcf);
+                        uint64_t const restored = (static_cast<uint64_t>(result[1]) << 070) +
+                                                  (static_cast<uint64_t>(result[2]) << 060) +
+                                                  (static_cast<uint64_t>(result[3]) << 050) +
+                                                  (static_cast<uint64_t>(result[4]) << 040) +
+                                                  (static_cast<uint64_t>(result[5]) << 030) +
+                                                  (static_cast<uint64_t>(result[6]) << 020) +
+                                                  (static_cast<uint64_t>(result[7]) << 010) +
+                                                  static_cast<uint64_t>(result[8]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("-128..-33 (int 8)")
+                {
+                    for (auto i = -128; i <= -33; ++i)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xd0,
+                            static_cast<uint8_t>(i),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 2);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xd0);
+                        CHECK(static_cast<int8_t>(result[1]) == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("-9263 (int 16)")
+                {
+                    json const j = -9263;
+                    std::vector<uint8_t> const expected = {0xd1, 0xdb, 0xd1};
+
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+
+                    auto const restored = static_cast<int16_t>((result[1] << 8) + result[2]);
+                    CHECK(restored == -9263);
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+
+                SECTION("-32768..-129 (int 16)")
+                {
+                    for (int16_t i = -32768; i <= static_cast<std::int16_t>(-129); i = utils::next_integer_sample(i, static_cast<int16_t>(-129), static_cast<int16_t>(7)))
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xd1,
+                            static_cast<uint8_t>((i >> 8) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 3);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xd1);
+                        auto const restored = static_cast<int16_t>((result[1] << 8) + result[2]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("-32769..-2147483648")
+                {
+                    std::vector<int32_t> const numbers
+                    {
+                        -32769,
+                        -65536,
+                        -77777,
+                        -1048576,
+                        -2147483648LL,
+                    };
+                    for (auto i : numbers)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xd2,
+                            static_cast<uint8_t>((i >> 24) & 0xff),
+                            static_cast<uint8_t>((i >> 16) & 0xff),
+                            static_cast<uint8_t>((i >> 8) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 5);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xd2);
+                        uint32_t const restored = (static_cast<uint32_t>(result[1]) << 030) +
+                                                  (static_cast<uint32_t>(result[2]) << 020) +
+                                                  (static_cast<uint32_t>(result[3]) << 010) +
+                                                  static_cast<uint32_t>(result[4]);
+                        CHECK(static_cast<std::int32_t>(restored) == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("-9223372036854775808..-2147483649 (int 64)")
+                {
+                    std::vector<int64_t> const numbers
+                    {
+                        (std::numeric_limits<int64_t>::min)(),
+                        -2147483649LL,
+                    };
+                    for (auto i : numbers)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with unsigned integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_integer());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xd3,
+                            static_cast<uint8_t>((i >> 070) & 0xff),
+                            static_cast<uint8_t>((i >> 060) & 0xff),
+                            static_cast<uint8_t>((i >> 050) & 0xff),
+                            static_cast<uint8_t>((i >> 040) & 0xff),
+                            static_cast<uint8_t>((i >> 030) & 0xff),
+                            static_cast<uint8_t>((i >> 020) & 0xff),
+                            static_cast<uint8_t>((i >> 010) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 9);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xd3);
+                        int64_t const restored = (static_cast<int64_t>(result[1]) << 070) +
+                                                 (static_cast<int64_t>(result[2]) << 060) +
+                                                 (static_cast<int64_t>(result[3]) << 050) +
+                                                 (static_cast<int64_t>(result[4]) << 040) +
+                                                 (static_cast<int64_t>(result[5]) << 030) +
+                                                 (static_cast<int64_t>(result[6]) << 020) +
+                                                 (static_cast<int64_t>(result[7]) << 010) +
+                                                 static_cast<int64_t>(result[8]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+            }
+
+            SECTION("unsigned")
+            {
+                SECTION("0..127 (positive fixnum)")
+                {
+                    for (size_t i = 0; i <= 127; ++i)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with unsigned integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_unsigned());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected{static_cast<uint8_t>(i)};
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 1);
+
+                        // check individual bytes
+                        CHECK(result[0] == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("128..255 (uint 8)")
+                {
+                    for (size_t i = 128; i <= 255; ++i)
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with unsigned integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_unsigned());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xcc,
+                            static_cast<uint8_t>(i),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 2);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xcc);
+                        auto const restored = static_cast<uint8_t>(result[1]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("256..65535 (uint 16)")
+                {
+                    for (size_t i = 256; i <= 65535; i = utils::next_integer_sample(i, static_cast<size_t>(65535), static_cast<size_t>(7)))
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with unsigned integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_unsigned());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xcd,
+                            static_cast<uint8_t>((i >> 8) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 3);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xcd);
+                        auto const restored = static_cast<uint16_t>((static_cast<uint8_t>(result[1]) * 256) + static_cast<uint8_t>(result[2]));
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("65536..4294967295 (uint 32)")
+                {
+                    for (const uint32_t i :
+                            {
+                                65536u, 77777u, 1048576u, 4294967295u
+                            })
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with unsigned integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_unsigned());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xce,
+                            static_cast<uint8_t>((i >> 24) & 0xff),
+                            static_cast<uint8_t>((i >> 16) & 0xff),
+                            static_cast<uint8_t>((i >> 8) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 5);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xce);
+                        uint32_t const restored = (static_cast<uint32_t>(result[1]) << 030) +
+                                                  (static_cast<uint32_t>(result[2]) << 020) +
+                                                  (static_cast<uint32_t>(result[3]) << 010) +
+                                                  static_cast<uint32_t>(result[4]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+
+                SECTION("4294967296..18446744073709551615 (uint 64)")
+                {
+                    for (const uint64_t i :
+                            {
+                                4294967296LU, 18446744073709551615LU
+                            })
+                    {
+                        CAPTURE(i)
+
+                        // create JSON value with unsigned integer number
+                        json const j = i;
+
+                        // check type
+                        CHECK(j.is_number_unsigned());
+
+                        // create expected byte vector
+                        std::vector<uint8_t> const expected
+                        {
+                            0xcf,
+                            static_cast<uint8_t>((i >> 070) & 0xff),
+                            static_cast<uint8_t>((i >> 060) & 0xff),
+                            static_cast<uint8_t>((i >> 050) & 0xff),
+                            static_cast<uint8_t>((i >> 040) & 0xff),
+                            static_cast<uint8_t>((i >> 030) & 0xff),
+                            static_cast<uint8_t>((i >> 020) & 0xff),
+                            static_cast<uint8_t>((i >> 010) & 0xff),
+                            static_cast<uint8_t>(i & 0xff),
+                        };
+
+                        // compare result + size
+                        const auto result = json::to_msgpack(j);
+                        CHECK(result == expected);
+                        CHECK(result.size() == 9);
+
+                        // check individual bytes
+                        CHECK(result[0] == 0xcf);
+                        uint64_t const restored = (static_cast<uint64_t>(result[1]) << 070) +
+                                                  (static_cast<uint64_t>(result[2]) << 060) +
+                                                  (static_cast<uint64_t>(result[3]) << 050) +
+                                                  (static_cast<uint64_t>(result[4]) << 040) +
+                                                  (static_cast<uint64_t>(result[5]) << 030) +
+                                                  (static_cast<uint64_t>(result[6]) << 020) +
+                                                  (static_cast<uint64_t>(result[7]) << 010) +
+                                                  static_cast<uint64_t>(result[8]);
+                        CHECK(restored == i);
+
+                        // roundtrip
+                        CHECK(json::from_msgpack(result) == j);
+                        CHECK(json::from_msgpack(result, true, false) == j);
+                    }
+                }
+            }
+
+            SECTION("float")
+            {
+                SECTION("3.1415925")
+                {
+                    double const v = 3.1415925;
+                    json const j = v;
+                    std::vector<uint8_t> const expected =
+                    {
+                        0xcb, 0x40, 0x09, 0x21, 0xfb, 0x3f, 0xa6, 0xde, 0xfc
+                    };
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result) == v);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+
+                SECTION("1.0")
+                {
+                    double const v = 1.0;
+                    json const j = v;
+                    std::vector<uint8_t> const expected =
+                    {
+                        0xca, 0x3f, 0x80, 0x00, 0x00
+                    };
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result) == v);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+
+                SECTION("128.128")
+                {
+                    double const v = 128.1280059814453125;
+                    json const j = v;
+                    std::vector<uint8_t> const expected =
+                    {
+                        0xca, 0x43, 0x00, 0x20, 0xc5
+                    };
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result) == v);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+        }
+
+        SECTION("string")
+        {
+            SECTION("N = 0..31")
+            {
+                // explicitly enumerate the first byte for all 32 strings
+                const std::vector<uint8_t> first_bytes =
+                {
+                    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8,
+                    0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf, 0xb0, 0xb1,
+                    0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba,
+                    0xbb, 0xbc, 0xbd, 0xbe, 0xbf
+                };
+
+                for (size_t N = 0; N < first_bytes.size(); ++N)
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::string(N, 'x');
+                    json const j = s;
+
+                    // create expected byte vector
+                    std::vector<uint8_t> expected;
+                    expected.push_back(first_bytes[N]);
+                    for (size_t i = 0; i < N; ++i)
+                    {
+                        expected.push_back('x');
+                    }
+
+                    // check first byte
+                    CHECK((first_bytes[N] & 0x1f) == N);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 1);
+                    // check that no null byte is appended
+                    if (N > 0)
+                    {
+                        CHECK(result.back() != '\x00');
+                    }
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 32..255")
+            {
+                for (size_t N = 32; N <= 255; ++N)
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::string(N, 'x');
+                    json const j = s;
+
+                    // create expected byte vector
+                    std::vector<uint8_t> expected;
+                    expected.push_back(0xd9);
+                    expected.push_back(static_cast<uint8_t>(N));
+                    for (size_t i = 0; i < N; ++i)
+                    {
+                        expected.push_back('x');
+                    }
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 2);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 256..65535")
+            {
+                for (size_t N :
+                        {
+                            256u, 999u, 1025u, 3333u, 2048u, 65535u
+                        })
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::string(N, 'x');
+                    json const j = s;
+
+                    // create expected byte vector (hack: create string first)
+                    std::vector<uint8_t> expected(N, 'x');
+                    // reverse order of commands, because we insert at begin()
+                    expected.insert(expected.begin(), static_cast<uint8_t>(N & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 8) & 0xff));
+                    expected.insert(expected.begin(), 0xda);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 3);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 65536..4294967295")
+            {
+                for (size_t N :
+                        {
+                            65536u, 77777u, 1048576u
+                        })
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::string(N, 'x');
+                    json const j = s;
+
+                    // create expected byte vector (hack: create string first)
+                    std::vector<uint8_t> expected(N, 'x');
+                    // reverse order of commands, because we insert at begin()
+                    expected.insert(expected.begin(), static_cast<uint8_t>(N & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 8) & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 16) & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 24) & 0xff));
+                    expected.insert(expected.begin(), 0xdb);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 5);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+        }
+
+        SECTION("array")
+        {
+            SECTION("empty")
+            {
+                json const j = json::array();
+                std::vector<uint8_t> const expected = {0x90};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("[null]")
+            {
+                json const j = {nullptr};
+                std::vector<uint8_t> const expected = {0x91, 0xc0};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("[1,2,3,4,5]")
+            {
+                json const j = json::parse("[1,2,3,4,5]");
+                std::vector<uint8_t> const expected = {0x95, 0x01, 0x02, 0x03, 0x04, 0x05};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("[[[[]]]]")
+            {
+                json const j = json::parse("[[[[]]]]");
+                std::vector<uint8_t> const expected = {0x91, 0x91, 0x91, 0x90};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("array 16")
+            {
+                json j(16, nullptr);
+                std::vector<uint8_t> expected(j.size() + 3, 0xc0); // all null
+                expected[0] = 0xdc; // array 16
+                expected[1] = 0x00; // size (0x0010), byte 0
+                expected[2] = 0x10; // size (0x0010), byte 1
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("array 32")
+            {
+                json j(65536, nullptr);
+                std::vector<uint8_t> expected(j.size() + 5, 0xc0); // all null
+                expected[0] = 0xdd; // array 32
+                expected[1] = 0x00; // size (0x00100000), byte 0
+                expected[2] = 0x01; // size (0x00100000), byte 1
+                expected[3] = 0x00; // size (0x00100000), byte 2
+                expected[4] = 0x00; // size (0x00100000), byte 3
+                const auto result = json::to_msgpack(j);
+                //CHECK(result == expected);
+
+                CHECK(result.size() == expected.size());
+                for (size_t i = 0; i < expected.size(); ++i)
+                {
+                    CAPTURE(i)
+                    CHECK(result[i] == expected[i]);
+                }
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+        }
+
+        SECTION("object")
+        {
+            SECTION("empty")
+            {
+                json const j = json::object();
+                std::vector<uint8_t> const expected = {0x80};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("{\"\":null}")
+            {
+                json const j = {{"", nullptr}};
+                std::vector<uint8_t> const expected = {0x81, 0xa0, 0xc0};
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("{\"a\": {\"b\": {\"c\": {}}}}")
+            {
+                json const j = json::parse(R"({"a": {"b": {"c": {}}}})");
+                std::vector<uint8_t> const expected =
+                {
+                    0x81, 0xa1, 0x61, 0x81, 0xa1, 0x62, 0x81, 0xa1, 0x63, 0x80
+                };
+                const auto result = json::to_msgpack(j);
+                CHECK(result == expected);
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("map 16")
+            {
+                json const j = R"({"00": null, "01": null, "02": null, "03": null,
+                             "04": null, "05": null, "06": null, "07": null,
+                             "08": null, "09": null, "10": null, "11": null,
+                             "12": null, "13": null, "14": null, "15": null})"_json;
+
+                const auto result = json::to_msgpack(j);
+
+                // Checking against an expected vector byte by byte is
+                // difficult, because no assumption on the order of key/value
+                // pairs are made. We therefore only check the prefix (type and
+                // size) and the overall size. The rest is then handled in the
+                // roundtrip check.
+                CHECK(result.size() == 67); // 1 type, 2 size, 16*4 content
+                CHECK(result[0] == 0xde); // map 16
+                CHECK(result[1] == 0x00); // byte 0 of size (0x0010)
+                CHECK(result[2] == 0x10); // byte 1 of size (0x0010)
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+
+            SECTION("map 32")
+            {
+                json j;
+                for (auto i = 0; i < 65536; ++i)
+                {
+                    // format i to a fixed width of 5
+                    // each entry will need 7 bytes: 6 for fixstr, 1 for null
+                    std::stringstream ss;
+                    ss << std::setw(5) << std::setfill('0') << i;
+                    j.emplace(ss.str(), nullptr);
+                }
+
+                const auto result = json::to_msgpack(j);
+
+                // Checking against an expected vector byte by byte is
+                // difficult, because no assumption on the order of key/value
+                // pairs are made. We therefore only check the prefix (type and
+                // size) and the overall size. The rest is then handled in the
+                // roundtrip check.
+                CHECK(result.size() == 458757); // 1 type, 4 size, 65536*7 content
+                CHECK(result[0] == 0xdf); // map 32
+                CHECK(result[1] == 0x00); // byte 0 of size (0x00010000)
+                CHECK(result[2] == 0x01); // byte 1 of size (0x00010000)
+                CHECK(result[3] == 0x00); // byte 2 of size (0x00010000)
+                CHECK(result[4] == 0x00); // byte 3 of size (0x00010000)
+
+                // roundtrip
+                CHECK(json::from_msgpack(result) == j);
+                CHECK(json::from_msgpack(result, true, false) == j);
+            }
+        }
+
+        SECTION("extension")
+        {
+            SECTION("N = 0..255")
+            {
+                for (size_t N = 0; N <= 0xFF; ++N)
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with byte array containing of N * 'x'
+                    const auto s = std::vector<uint8_t>(N, 'x');
+                    json j = json::binary(s);
+                    std::uint8_t const subtype = 42;
+                    j.get_binary().set_subtype(subtype);
+
+                    // create expected byte vector
+                    std::vector<uint8_t> expected;
+                    switch (N)
+                    {
+                        case 1:
+                            expected.push_back(static_cast<std::uint8_t>(0xD4));
+                            break;
+                        case 2:
+                            expected.push_back(static_cast<std::uint8_t>(0xD5));
+                            break;
+                        case 4:
+                            expected.push_back(static_cast<std::uint8_t>(0xD6));
+                            break;
+                        case 8:
+                            expected.push_back(static_cast<std::uint8_t>(0xD7));
+                            break;
+                        case 16:
+                            expected.push_back(static_cast<std::uint8_t>(0xD8));
+                            break;
+                        default:
+                            expected.push_back(static_cast<std::uint8_t>(0xC7));
+                            expected.push_back(static_cast<std::uint8_t>(N));
+                            break;
+                    }
+                    expected.push_back(subtype);
+
+                    for (size_t i = 0; i < N; ++i)
+                    {
+                        expected.push_back(0x78);
+                    }
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    switch (N)
+                    {
+                        case 1:
+                        case 2:
+                        case 4:
+                        case 8:
+                        case 16:
+                            CHECK(result.size() == N + 2);
+                            break;
+                        default:
+                            CHECK(result.size() == N + 3);
+                            break;
+                    }
+
+                    // check that no null byte is appended
+                    if (N > 0)
+                    {
+                        CHECK(result.back() != '\x00');
+                    }
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 256..65535")
+            {
+                for (std::size_t N :
+                        {
+                            256u, 999u, 1025u, 3333u, 2048u, 65535u
+                        })
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::vector<uint8_t>(N, 'x');
+                    json j = json::binary(s);
+                    std::uint8_t const subtype = 42;
+                    j.get_binary().set_subtype(subtype);
+
+                    // create expected byte vector (hack: create string first)
+                    std::vector<uint8_t> expected(N, 'x');
+                    // reverse order of commands, because we insert at begin()
+                    expected.insert(expected.begin(), subtype);
+                    expected.insert(expected.begin(), static_cast<uint8_t>(N & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 8) & 0xff));
+                    expected.insert(expected.begin(), 0xC8);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 4);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 65536..4294967295")
+            {
+                for (std::size_t N :
+                        {
+                            65536u, 77777u, 1048576u
+                        })
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::vector<uint8_t>(N, 'x');
+                    json j = json::binary(s);
+                    std::uint8_t const subtype = 42;
+                    j.get_binary().set_subtype(subtype);
+
+                    // create expected byte vector (hack: create string first)
+                    std::vector<uint8_t> expected(N, 'x');
+                    // reverse order of commands, because we insert at begin()
+                    expected.insert(expected.begin(), subtype);
+                    expected.insert(expected.begin(), static_cast<uint8_t>(N & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 8) & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 16) & 0xff));
+                    expected.insert(expected.begin(), static_cast<uint8_t>((N >> 24) & 0xff));
+                    expected.insert(expected.begin(), 0xC9);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 6);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+        }
+
+        SECTION("binary")
+        {
+            SECTION("N = 0..255")
+            {
+                for (std::size_t N = 0; N <= 0xFF; ++N)
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with byte array containing of N * 'x'
+                    const auto s = std::vector<uint8_t>(N, 'x');
+                    json const j = json::binary(s);
+
+                    // create expected byte vector
+                    std::vector<std::uint8_t> expected;
+                    expected.push_back(static_cast<std::uint8_t>(0xC4));
+                    expected.push_back(static_cast<std::uint8_t>(N));
+                    for (size_t i = 0; i < N; ++i)
+                    {
+                        expected.push_back(0x78);
+                    }
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 2);
+                    // check that no null byte is appended
+                    if (N > 0)
+                    {
+                        CHECK(result.back() != '\x00');
+                    }
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 256..65535")
+            {
+                for (std::size_t N :
+                        {
+                            256u, 999u, 1025u, 3333u, 2048u, 65535u
+                        })
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::vector<std::uint8_t>(N, 'x');
+                    json const j = json::binary(s);
+
+                    // create expected byte vector (hack: create string first)
+                    std::vector<std::uint8_t> expected(N, 'x');
+                    // reverse order of commands, because we insert at begin()
+                    expected.insert(expected.begin(), static_cast<std::uint8_t>(N & 0xff));
+                    expected.insert(expected.begin(), static_cast<std::uint8_t>((N >> 8) & 0xff));
+                    expected.insert(expected.begin(), 0xC5);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 3);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+
+            SECTION("N = 65536..4294967295")
+            {
+                for (std::size_t N :
+                        {
+                            65536u, 77777u, 1048576u
+                        })
+                {
+                    CAPTURE(N)
+
+                    // create JSON value with string containing of N * 'x'
+                    const auto s = std::vector<std::uint8_t>(N, 'x');
+                    json const j = json::binary(s);
+
+                    // create expected byte vector (hack: create string first)
+                    std::vector<uint8_t> expected(N, 'x');
+                    // reverse order of commands, because we insert at begin()
+                    expected.insert(expected.begin(), static_cast<std::uint8_t>(N & 0xff));
+                    expected.insert(expected.begin(), static_cast<std::uint8_t>((N >> 8) & 0xff));
+                    expected.insert(expected.begin(), static_cast<std::uint8_t>((N >> 16) & 0xff));
+                    expected.insert(expected.begin(), static_cast<std::uint8_t>((N >> 24) & 0xff));
+                    expected.insert(expected.begin(), 0xC6);
+
+                    // compare result + size
+                    const auto result = json::to_msgpack(j);
+                    CHECK(result == expected);
+                    CHECK(result.size() == N + 5);
+                    // check that no null byte is appended
+                    CHECK(result.back() != '\x00');
+
+                    // roundtrip
+                    CHECK(json::from_msgpack(result) == j);
+                    CHECK(json::from_msgpack(result, true, false) == j);
+                }
+            }
+        }
+    }
+
+    SECTION("from float32")
+    {
+        auto given = std::vector<uint8_t>({0xca, 0x41, 0xc8, 0x00, 0x01});
+        json const j = json::from_msgpack(given);
+        CHECK(j.get<double>() == Approx(25.0000019073486));
+    }
+
+    SECTION("errors")
+    {
+        SECTION("empty byte vector")
+        {
+            json _;
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>()), "[json.exception.parse_error.110] parse error at byte 1: syntax error while parsing MessagePack value: unexpected end of input", json::parse_error&);
+            CHECK(json::from_msgpack(std::vector<uint8_t>(), true, false).is_discarded());
+        }
+
+        SECTION("too short byte vector")
+        {
+            json _;
+
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0x87})),
+                                 "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack string: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcc})),
+                                 "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcd})),
+                                 "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcd, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 3: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xce})),
+                                 "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xce, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 3: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xce, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 4: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xce, 0x00, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 5: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf})),
+                                 "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 3: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 4: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 5: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 6: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 7: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 8: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})),
+                                 "[json.exception.parse_error.110] parse error at byte 9: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xa5, 0x68, 0x65})),
+                                 "[json.exception.parse_error.110] parse error at byte 4: syntax error while parsing MessagePack string: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0x92, 0x01})),
+                                 "[json.exception.parse_error.110] parse error at byte 3: syntax error while parsing MessagePack value: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0x81, 0xa1, 0x61})),
+                                 "[json.exception.parse_error.110] parse error at byte 4: syntax error while parsing MessagePack value: unexpected end of input", json::parse_error&);
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xc4, 0x02})),
+                                 "[json.exception.parse_error.110] parse error at byte 3: syntax error while parsing MessagePack binary: unexpected end of input", json::parse_error&);
+
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0x87}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcc}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcd}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcd, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xce}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xce, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xce, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xce, 0x00, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xcf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xa5, 0x68, 0x65}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0x92, 0x01}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0x81, 0xA1, 0x61}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xc4, 0x02}), true, false).is_discarded());
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xc4}), true, false).is_discarded());
+        }
+
+        SECTION("unexpected end inside int with stream")
+        {
+            json _;
+            const std::string data = {static_cast<char>(0xd2u), static_cast<char>(0x12u), static_cast<char>(0x34u), static_cast<char>(0x56u)};
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::istringstream(data, std::ios::binary)),
+                                 "[json.exception.parse_error.110] parse error at byte 5: syntax error while parsing MessagePack number: unexpected end of input", json::parse_error&);
+        }
+        SECTION("misuse wchar for binary")
+        {
+            json _;
+            // creates 0xd2 after UTF-8 decoding, triggers get_elements in wide_string_input_adapter for code coverage
+            const std::u32string data = {static_cast<char32_t>(0x0280)};
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(data),
+                                 "[json.exception.parse_error.112] parse error at byte 1: wide string type cannot be interpreted as binary data", json::parse_error&);
+        }
+
+        SECTION("unsupported bytes")
+        {
+            SECTION("concrete examples")
+            {
+                json _;
+                CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xc1})), "[json.exception.parse_error.112] parse error at byte 1: syntax error while parsing MessagePack value: invalid byte: 0xC1", json::parse_error&);
+            }
+
+            SECTION("all unsupported bytes")
+            {
+                for (auto byte :
+                        {
+                            // never used
+                            0xc1
+                        })
+                {
+                    json _;
+                    CHECK_THROWS_AS(_ = json::from_msgpack(std::vector<uint8_t>({static_cast<uint8_t>(byte)})), json::parse_error&);
+                    CHECK(json::from_msgpack(std::vector<uint8_t>({static_cast<uint8_t>(byte)}), true, false).is_discarded());
+                }
+            }
+        }
+
+        SECTION("invalid string in map")
+        {
+            json _;
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0x81, 0xff, 0x01})), "[json.exception.parse_error.113] parse error at byte 2: syntax error while parsing MessagePack object key: only string keys are supported, but found an integer; last byte: 0xFF", json::parse_error&);
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0x81, 0xff, 0x01}), true, false).is_discarded());
+        }
+
+        SECTION("non-string key (see #3381)")
+        {
+            // only strings map to JSON object keys; any other key is rejected
+            // with a message naming its type
+            const std::vector<std::pair<std::vector<std::uint8_t>, std::string>> cases =
+            {
+                {{0x81, 0xC0, 0x01}, "nil; last byte: 0xC0"},
+                {{0x81, 0xC2, 0x01}, "a boolean; last byte: 0xC2"},
+                {{0x81, 0xC3, 0x01}, "a boolean; last byte: 0xC3"},
+                {{0x81, 0xCA, 0x3F, 0x80, 0x00, 0x00, 0x01}, "a float; last byte: 0xCA"},
+                {{0x81, 0xCB, 0x3F, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}, "a float; last byte: 0xCB"},
+                {{0x81, 0xC4, 0x00, 0x01}, "a bin; last byte: 0xC4"},
+                {{0x81, 0xC5, 0x00, 0x00, 0x01}, "a bin; last byte: 0xC5"},
+                {{0x81, 0xC6, 0x00, 0x00, 0x00, 0x00, 0x01}, "a bin; last byte: 0xC6"},
+                {{0x81, 0xC7, 0x00, 0x01, 0x01}, "an ext; last byte: 0xC7"},
+                {{0x81, 0xC8, 0x00, 0x00, 0x01, 0x01}, "an ext; last byte: 0xC8"},
+                {{0x81, 0xC9, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01}, "an ext; last byte: 0xC9"},
+                {{0x81, 0xD4, 0x01, 0x00, 0x01}, "an ext; last byte: 0xD4"},
+                {{0x81, 0xD5, 0x01, 0x00, 0x00, 0x01}, "an ext; last byte: 0xD5"},
+                {{0x81, 0xD6, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01}, "an ext; last byte: 0xD6"},
+                {{0x81, 0xD7, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}, "an ext; last byte: 0xD7"},
+                {{0x81, 0xD8, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}, "an ext; last byte: 0xD8"},
+                {{0x81, 0xCC, 0x01, 0x01}, "an integer; last byte: 0xCC"},
+                {{0x81, 0xCD, 0x00, 0x01, 0x01}, "an integer; last byte: 0xCD"},
+                {{0x81, 0xCE, 0x00, 0x00, 0x00, 0x01, 0x01}, "an integer; last byte: 0xCE"},
+                {{0x81, 0xCF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01}, "an integer; last byte: 0xCF"},
+                {{0x81, 0xD0, 0x01, 0x01}, "an integer; last byte: 0xD0"},
+                {{0x81, 0xD1, 0x00, 0x01, 0x01}, "an integer; last byte: 0xD1"},
+                {{0x81, 0xD2, 0x00, 0x00, 0x00, 0x01, 0x01}, "an integer; last byte: 0xD2"},
+                {{0x81, 0xD3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01}, "an integer; last byte: 0xD3"},
+                {{0x81, 0x00, 0x01}, "an integer; last byte: 0x00"},
+                {{0x81, 0x7F, 0x01}, "an integer; last byte: 0x7F"},
+                {{0x81, 0xE0, 0x01}, "an integer; last byte: 0xE0"},
+                {{0x81, 0x80, 0x01}, "a map; last byte: 0x80"},
+                {{0x81, 0x8F, 0x01}, "a map; last byte: 0x8F"},
+                {{0x81, 0xDE, 0x00, 0x00, 0x01}, "a map; last byte: 0xDE"},
+                {{0x81, 0xDF, 0x00, 0x00, 0x00, 0x00, 0x01}, "a map; last byte: 0xDF"},
+                {{0x81, 0x90, 0x01}, "an array; last byte: 0x90"},
+                {{0x81, 0x9F, 0x01}, "an array; last byte: 0x9F"},
+                {{0x81, 0xDC, 0x00, 0x00, 0x01}, "an array; last byte: 0xDC"},
+                {{0x81, 0xDD, 0x00, 0x00, 0x00, 0x00, 0x01}, "an array; last byte: 0xDD"},
+            };
+
+            for (const auto& c : cases)
+            {
+                CAPTURE(c.first)
+                const std::string expected = "[json.exception.parse_error.113] parse error at byte 2: syntax error while parsing MessagePack object key: only string keys are supported, but found " + c.second;
+                json _;
+                CHECK_THROWS_WITH_AS(_ = json::from_msgpack(c.first), expected.c_str(), json::parse_error&);
+                CHECK(json::from_msgpack(c.first, true, false).is_discarded());
+            }
+
+            json _;
+            // the unused byte 0xC1 is still reported as a malformed string
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0x81, 0xC1, 0x01})), "[json.exception.parse_error.113] parse error at byte 2: syntax error while parsing MessagePack string: expected length specification (0xA0-0xBF, 0xD9-0xDB); last byte: 0xC1", json::parse_error&);
+            // a missing key is still reported as the end of input
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0x81})), "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack string: unexpected end of input", json::parse_error&);
+        }
+
+        SECTION("invalid UTF-8 in string (see #5529)")
+        {
+            // a fixstr of length 2 (0xA0 | 2) whose bytes are not valid UTF-8
+            // (0xC0 0xAE is an overlong encoding of '.') must be rejected at
+            // decode time, matching every other kind of malformed binary
+            // input, rather than only failing later when the resulting
+            // value is dumped
+            json _;
+            CHECK_THROWS_WITH_AS(_ = json::from_msgpack(std::vector<uint8_t>({0xa2, 0xc0, 0xae})), "[json.exception.parse_error.113] parse error at byte 3: syntax error while parsing MessagePack string: invalid string: ill-formed UTF-8 byte", json::parse_error&);
+            CHECK(json::from_msgpack(std::vector<uint8_t>({0xa2, 0xc0, 0xae}), true, false).is_discarded());
+
+            // a MessagePack bin8 blob with the very same bytes is NOT text
+            // and must still be accepted as-is
+            CHECK_NOTHROW(_ = json::from_msgpack(std::vector<uint8_t>({0xc4, 0x02, 0xc0, 0xae})));
+            CHECK(_ == json::binary(std::vector<std::uint8_t>({0xc0, 0xae})));
+
+            // valid UTF-8 must still round-trip
+            const json j = "h\xc3\xa9llo, w\xc3\xb6rld! \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"; // héllo, wörld! 日本語
+            CHECK(json::from_msgpack(json::to_msgpack(j)) == j);
+        }
+
+        SECTION("strict mode")
+        {
+            std::vector<uint8_t> const vec = {0xc0, 0xc0};
+            SECTION("non-strict mode")
+            {
+                const auto result = json::from_msgpack(vec, false);
+                CHECK(result == json());
+            }
+
+            SECTION("strict mode")
+            {
+                json _;
+                CHECK_THROWS_WITH_AS(_ = json::from_msgpack(vec), "[json.exception.parse_error.110] parse error at byte 2: syntax error while parsing MessagePack value: expected end of input; last byte: 0xC0", json::parse_error&);
+                CHECK(json::from_msgpack(vec, true, false).is_discarded());
+            }
+        }
+    }
+
+    SECTION("SAX aborts")
+    {
+        SECTION("start_array(len)")
+        {
+            std::vector<uint8_t> const v = {0x93, 0x01, 0x02, 0x03};
+            SaxCountdown scp(0);
+            CHECK(!json::sax_parse(v, &scp, json::input_format_t::msgpack));
+        }
+
+        SECTION("start_object(len)")
+        {
+            std::vector<uint8_t> const v = {0x81, 0xa3, 0x66, 0x6F, 0x6F, 0xc2};
+            SaxCountdown scp(0);
+            CHECK(!json::sax_parse(v, &scp, json::input_format_t::msgpack));
+        }
+
+        SECTION("key()")
+        {
+            std::vector<uint8_t> const v = {0x81, 0xa3, 0x66, 0x6F, 0x6F, 0xc2};
+            SaxCountdown scp(1);
+            CHECK(!json::sax_parse(v, &scp, json::input_format_t::msgpack));
+        }
+    }
+}
+
+TEST_CASE("issue #5405 - array reserve for definite-length MessagePack arrays")
+{
+#if !defined(JSON_NOEXCEPTION)
+    // this SECTION relies on catching a thrown exception to distinguish
+    // which of two acceptable, bounded rejections a hostile header took;
+    // under JSON_NOEXCEPTION, JSON_THROW never produces a catchable C++
+    // exception (it aborts instead), so this cannot be tested that way here
+    SECTION("a huge claimed length with no element data must not over-allocate")
+    {
+        // 0xdd: array 32 (four-byte length); claims 0xFFFFFFFF (4294967295)
+        // elements but provides none. max_size() for a std::vector is far
+        // larger than this count, so it does not reject the header outright;
+        // the (capped) reservation must not attempt to allocate space for
+        // billions of elements before the missing data is detected.
+        json _;
+        const std::vector<uint8_t> input = {0xdd, 0xFF, 0xFF, 0xFF, 0xFF};
+        // On a platform where std::size_t is narrower than 64 bits (e.g.
+        // 32-bit), the claimed count 0xFFFFFFFF coincides with that
+        // platform's SIZE_MAX, which some size-narrowing checks treat the
+        // same as detail::unknown_size(); it may then be rejected before
+        // the SAX consumer's own max_size() check (out_of_range.408) rather
+        // than being accepted and only found short of data once the
+        // (capped) reservation looks for element bytes that were never
+        // provided (parse_error.110). Either is an acceptable, bounded
+        // rejection of the hostile header -- the property under test is
+        // that no path attempts to allocate space for billions of elements.
+        bool threw = false;
+        try
+        {
+            _ = json::from_msgpack(input);
+        }
+        catch (const json::parse_error& e)
+        {
+            threw = true;
+            CHECK(e.id == 110);
+            CHECK(std::string(e.what()) == "[json.exception.parse_error.110] parse error at byte 6: syntax error while parsing MessagePack value: unexpected end of input");
+        }
+        catch (const json::out_of_range& e)
+        {
+            threw = true;
+            CHECK(e.id == 408);
+            CHECK(std::string(e.what()).find("excessive") != std::string::npos);
+        }
+        CHECK(threw);
+        CHECK(json::from_msgpack(input, true, false).is_discarded());
+    }
+#endif
+
+    SECTION("arrays of various sizes decode to the same value as before the reserve optimization")
+    {
+        for (const auto size :
+                {
+                    std::size_t{0}, std::size_t{1}, std::size_t{5}, // small
+                    std::size_t{16384},                             // exactly at the reserve cap
+                    std::size_t{20000}                              // above the reserve cap
+                })
+        {
+            CAPTURE(size)
+            json j = json::array();
+            for (std::size_t i = 0; i < size; ++i)
+            {
+                j.push_back(static_cast<int>(i % 1000));
+            }
+
+            const auto packed = json::to_msgpack(j);
+            CHECK(json::from_msgpack(packed) == j);
+        }
+    }
+
+    SECTION("a user-defined SAX consumer is unaffected by the internal DOM reserve optimization")
+    {
+        // the reserve() call is local to json_sax_dom_parser / json_sax_dom_callback_parser;
+        // a custom SAX consumer that does not touch a DOM array sees identical events
+        json j = json::array();
+        for (int i = 0; i < 100; ++i)
+        {
+            j.push_back(i);
+        }
+        const auto packed = json::to_msgpack(j);
+
+        SaxCountdown scp(1000000); // large enough to never trigger an abort
+        CHECK(json::sax_parse(packed, &scp, json::input_format_t::msgpack));
+    }
+}
+
+TEST_CASE("regression test - MessagePack ext type rejects a subtype that doesn't fit a single byte")
+{
+    // subtype 0-255 must still round-trip correctly (regression guard, pre-existing behavior)
+    CHECK(json::from_msgpack(json::to_msgpack(json::binary({1, 2}, 0))).get_binary().subtype() == 0);
+    CHECK(json::from_msgpack(json::to_msgpack(json::binary({1, 2}, 200))).get_binary().subtype() == 200);
+    CHECK(json::from_msgpack(json::to_msgpack(json::binary({1, 2}, 255))).get_binary().subtype() == 255);
+
+    // a subtype > 255 must throw instead of silently truncating
+    CHECK_THROWS_AS(json::to_msgpack(json::binary({1, 2}, 256)), json::out_of_range);
+    CHECK_THROWS_WITH_AS(json::to_msgpack(json::binary({1, 2}, 70000)), "[json.exception.out_of_range.415] subtype 70000 is too large for the MessagePack ext type (max 255)", json::out_of_range);
+
+    // a binary value with no subtype at all must be unaffected
+    CHECK(json::from_msgpack(json::to_msgpack(json::binary({1, 2}))).get_binary().has_subtype() == false);
+}
+
+// use this testcase outside [hide] to run it with Valgrind
+TEST_CASE("MessagePack nesting does not consume the call stack")
+{
+    // Reading a container used to call back into the value reader once per
+    // element, so the native call stack grew with the nesting depth of the
+    // input: one frame per byte for repeated 0x91 (a one-element array), which
+    // crashes the process long before the input is exhausted (#5104). The
+    // containers are kept on a heap stack now.
+    //
+    // Note that deeply nested values must not be compared, copied or dumped
+    // here: those operations are still recursive, and would reintroduce the
+    // very crash this checks for. Depth is measured by descending instead.
+
+    SECTION("an unterminated chain is reported, not crashed on")
+    {
+        json _;
+        const std::vector<uint8_t> input(300000, 0x91);
+        CHECK_THROWS_WITH_AS(_ = json::from_msgpack(input), "[json.exception.parse_error.110] parse error at byte 300001: syntax error while parsing MessagePack value: unexpected end of input", json::parse_error&);
+        CHECK(json::from_msgpack(input, true, false).is_discarded());
+    }
+
+    SECTION("a well-formed deep value is read through the SAX interface")
+    {
+        std::vector<uint8_t> input(300000, 0x91);
+        input.push_back(0x01); // innermost value
+
+        SaxCountdown accept_all(600001);
+        CHECK(json::sax_parse(input, &accept_all, json::input_format_t::msgpack));
+    }
+
+    SECTION("a well-formed deep value is read into a value")
+    {
+        const std::size_t depth = 10000;
+        std::vector<uint8_t> input(depth, 0x91);
+        input.push_back(0x01);
+
+        json j = json::from_msgpack(input);
+
+        std::size_t measured = 0;
+        const json* p = &j;
+        while (p->is_array() && !p->empty())
+        {
+            p = &p->front();
+            ++measured;
+        }
+        CHECK(measured == depth);
+        CHECK(p->is_number());
+    }
+
+    SECTION("containers are still read the same way")
+    {
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0x90})) == json::array());
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0x80})) == json::object());
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0x92, 0x90, 0x80})) == json({json::array(), json::object()}));
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0x91, 0x91, 0x91, 0x90})) == json({{{json::array()}}}));
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0x81, 0xA1, 'a', 0x81, 0xA1, 'b', 0x92, 0x01, 0x02})) == json({{"a", {{"b", {1, 2}}}}}));
+        // array 16 and map 32, i.e. the counted forms
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0xDC, 0x00, 0x02, 0x01, 0x02})) == json({1, 2}));
+        CHECK(json::from_msgpack(std::vector<uint8_t>({0xDF, 0x00, 0x00, 0x00, 0x01, 0xA1, 'k', 0xC3})) == json({{"k", true}}));
+    }
+}
+
+TEST_CASE("MessagePack input that cannot be read is discarded by every overload")
+{
+    std::vector<std::uint8_t> input = json::to_msgpack(json({{"a", {1, 2}}}));
+    input.pop_back();
+
+    json _;
+    CHECK_THROWS_AS(_ = json::from_msgpack(input.begin(), input.end()), json::parse_error&);
+    CHECK(json::from_msgpack(input, true, false).is_discarded());
+    CHECK(json::from_msgpack(input.begin(), input.end(), true, false).is_discarded());
+    CHECK(json::from_msgpack(input.data(), input.size(), true, false).is_discarded());
+    CHECK(json::from_msgpack({input.data(), input.size()}, true, false).is_discarded());
+}
+
+TEST_CASE("MessagePack SAX parsing stops at every event")
+{
+    // Containers are opened and closed by the loop that reads them; a SAX
+    // handler that rejects any event - including the end of a nested
+    // container - must stop the parse right there.
+    const auto count_events = [](const std::vector<std::uint8_t>& input)
+    {
+        int events = 0;
+        while (true)
+        {
+            SaxCountdown scp(events);
+            if (json::sax_parse(input, &scp, json::input_format_t::msgpack))
+            {
+                return events;
+            }
+            ++events;
+            REQUIRE(events < 1000);
+        }
+    };
+
+    // 20 events: every container kind closes inside another one
+    const json j = json::parse(R"({"a": [1, {"b": []}], "c": {"d": [[2]]}})");
+    CHECK(count_events(json::to_msgpack(j)) == 20);
+}
+
+TEST_CASE("single MessagePack roundtrip")
+{
+    SECTION("sample.json")
+    {
+        std::string const filename = TEST_DATA_DIRECTORY "/json_testsuite/sample.json";
+
+        // parse JSON file
+        std::ifstream f_json(filename);
+        const json j1 = json::parse(f_json);
+
+        // parse MessagePack file
+        auto packed = utils::read_binary_file(filename + ".msgpack");
+        json j2;
+        CHECK_NOTHROW(j2 = json::from_msgpack(packed));
+
+        // compare parsed JSON values
+        CHECK(j1 == j2);
+
+        SECTION("roundtrips")
+        {
+            SECTION("std::ostringstream")
+            {
+                std::basic_ostringstream<char> ss;
+                json::to_msgpack(j1, ss);
+                json j3 = json::from_msgpack(ss.str());
+                CHECK(j1 == j3);
+            }
+
+            SECTION("std::string")
+            {
+                std::string s;
+                json::to_msgpack(j1, s);
+                json j3 = json::from_msgpack(s);
+                CHECK(j1 == j3);
+            }
+        }
+
+        // check with different start index
+        packed.insert(packed.begin(), 5, 0xff);
+        CHECK(j1 == json::from_msgpack(packed.begin() + 5, packed.end()));
+    }
+}
+
+TEST_CASE("Parse MessagePack directly from a file using iterator and sentinel")
+{
+    std::string const filename = TEST_DATA_DIRECTORY "/json_testsuite/sample.json.msgpack";
+    std::ifstream file(filename, std::ios::binary);
+    const std::istreambuf_iterator<char> first(file);
+    const json parsed = json::from_msgpack(first, utils::istreambuf_sentinel{});
+    CHECK((parsed.is_object() || parsed.is_array()));
+}
+
+TEST_CASE("MessagePack round-trip invariants")
+{
+    // This checks what the parse_msgpack_fuzzer driver checks (see
+    // tests/src/fuzzer-parse_msgpack.cpp), so that a regression shows up in
+    // CI rather than as an OSS-Fuzz report: anything from_msgpack() returns
+    // (j1) can be serialized, parsed back (j2), and serialized again to
+    // reproduce the exact bytes.
+    for (const auto& j0 : utils::round_trip_corpus::values())
+    {
+        json j1;
+        try
+        {
+            // turn the corpus value into a value as from_msgpack() returns it
+            j1 = json::from_msgpack(json::to_msgpack(j0));
+        }
+        catch (const json::exception&)
+        {
+            // the fuzzer driver only ever sees values from_msgpack() actually
+            // produced, so skip corpus values that do not survive the
+            // round trip here, too
+            continue;
+        }
+
+        INFO("j1 = " << j1.dump());
+        const std::vector<std::uint8_t> vec = json::to_msgpack(j1);
+        json j2;
+        // anything the library writes must be parsable by the library
+        REQUIRE_NOTHROW(j2 = json::from_msgpack(vec));
+        CHECK(json::to_msgpack(j2) == vec);
+    }
+}
+
+TEST_CASE("MessagePack roundtrips" * doctest::skip())
+{
+    SECTION("input from msgpack-python")
+    {
+        // most of these are excluded due to differences in key order (not a real problem)
+        std::set<std::string> exclude_packed;
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json.org/1.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json.org/2.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json.org/3.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json.org/4.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json.org/5.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json_testsuite/sample.json"); // kills AppVeyor
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/json_tests/pass1.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/regression/working_file.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_basic.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_duplicated_key.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_long_strings.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_simple.json");
+        exclude_packed.insert(TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_string_unicode.json");
+
+        for (std::string filename :
+                {
+                    TEST_DATA_DIRECTORY "/json_nlohmann_tests/all_unicode.json",
+                    TEST_DATA_DIRECTORY "/json.org/1.json",
+                    TEST_DATA_DIRECTORY "/json.org/2.json",
+                    TEST_DATA_DIRECTORY "/json.org/3.json",
+                    TEST_DATA_DIRECTORY "/json.org/4.json",
+                    TEST_DATA_DIRECTORY "/json.org/5.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip01.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip02.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip03.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip04.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip05.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip06.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip07.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip08.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip09.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip10.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip11.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip12.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip13.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip14.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip15.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip16.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip17.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip18.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip19.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip20.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip21.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip22.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip23.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip24.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip25.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip26.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip27.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip28.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip29.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip30.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip31.json",
+                    TEST_DATA_DIRECTORY "/json_roundtrip/roundtrip32.json",
+                    TEST_DATA_DIRECTORY "/json_testsuite/sample.json", // kills AppVeyor
+                    TEST_DATA_DIRECTORY "/json_tests/pass1.json",
+                    TEST_DATA_DIRECTORY "/json_tests/pass2.json",
+                    TEST_DATA_DIRECTORY "/json_tests/pass3.json",
+                    TEST_DATA_DIRECTORY "/regression/floats.json",
+                    TEST_DATA_DIRECTORY "/regression/signed_ints.json",
+                    TEST_DATA_DIRECTORY "/regression/unsigned_ints.json",
+                    TEST_DATA_DIRECTORY "/regression/working_file.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_arraysWithSpaces.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_empty-string.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_empty.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_ending_with_newline.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_false.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_heterogeneous.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_null.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_with_1_and_newline.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_with_leading_space.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_with_several_null.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_array_with_trailing_space.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_0e+1.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_0e1.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_after_space.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_double_close_to_zero.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_double_huge_neg_exp.json",
+                    //TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_huge_exp.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_int_with_exp.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_minus_zero.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_negative_int.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_negative_one.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_negative_zero.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_capital_e.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_capital_e_neg_exp.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_capital_e_pos_exp.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_exponent.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_fraction_exponent.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_neg_exp.json",
+                    //TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_neg_overflow.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_pos_exponent.json",
+                    //TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_pos_overflow.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_real_underflow.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_simple_int.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_simple_real.json",
+                    //TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_too_big_neg_int.json",
+                    //TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_too_big_pos_int.json",
+                    //TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_number_very_big_negative_int.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_basic.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_duplicated_key.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_duplicated_key_and_value.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_empty.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_empty_key.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_escaped_null_in_key.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_extreme_numbers.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_long_strings.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_simple.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_string_unicode.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_object_with_newlines.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_1_2_3_bytes_UTF-8_sequences.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_UTF-16_Surrogates_U+1D11E_MUSICAL_SYMBOL_G_CLEF.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_accepted_surrogate_pair.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_accepted_surrogate_pairs.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_allowed_escapes.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_backslash_and_u_escaped_zero.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_backslash_doublequotes.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_comments.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_double_escape_a.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_double_escape_n.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_escaped_control_character.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_escaped_noncharacter.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_in_array.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_in_array_with_leading_space.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_last_surrogates_1_and_2.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_newline_uescaped.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_nonCharacterInUTF-8_U+10FFFF.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_nonCharacterInUTF-8_U+1FFFF.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_nonCharacterInUTF-8_U+FFFF.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_null_escape.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_one-byte-utf-8.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_pi.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_simple_ascii.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_space.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_three-byte-utf-8.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_two-byte-utf-8.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_u+2028_line_sep.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_u+2029_par_sep.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_uEscape.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unescaped_char_delete.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unicode.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unicodeEscapedBackslash.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unicode_2.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unicode_U+200B_ZERO_WIDTH_SPACE.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unicode_U+2064_invisible_plus.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_unicode_escaped_double_quote.json",
+                    // TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_utf16.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_utf8.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_string_with_del_character.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_lonely_false.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_lonely_int.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_lonely_negative_real.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_lonely_null.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_lonely_string.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_lonely_true.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_string_empty.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_trailing_newline.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_true_in_array.json",
+                    TEST_DATA_DIRECTORY "/nst_json_testsuite/test_parsing/y_structure_whitespace_array.json"
+                })
+        {
+            CAPTURE(filename)
+
+            std::ifstream f_json(filename);
+            const json j1 = json::parse(f_json);
+            auto packed = utils::read_binary_file(filename + ".msgpack");
+
+            {
+                INFO_WITH_TEMP(filename + ": std::vector<uint8_t>");
+                json j2;
+                CHECK_NOTHROW(j2 = json::from_msgpack(packed));
+                CHECK(j1 == j2);
+            }
+
+            {
+                INFO_WITH_TEMP(filename + ": std::ifstream");
+                std::ifstream f_msgpack(filename + ".msgpack", std::ios::binary);
+                json j2;
+                CHECK_NOTHROW(j2 = json::from_msgpack(f_msgpack));
+                CHECK(j1 == j2);
+            }
+
+            {
+                INFO_WITH_TEMP(filename + ": uint8_t* and size");
+                json j2;
+                CHECK_NOTHROW(j2 = json::from_msgpack({packed.data(), packed.size()}));
+                CHECK(j1 == j2);
+            }
+
+            {
+                INFO_WITH_TEMP(filename + ": output to output adapters");
+                if (exclude_packed.count(filename) == 0u)
+                {
+                    {
+                        INFO_WITH_TEMP(filename + ": output adapters: std::vector<uint8_t>");
+                        std::vector<uint8_t> vec;
+                        json::to_msgpack(j1, vec);
+                        CHECK(vec == packed);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#ifdef JSON_HAS_CPP_17
+// Test suite for verifying MessagePack handling with std::byte input
+TEST_CASE("MessagePack with std::byte")
+{
+
+    SECTION("std::byte compatibility")
+    {
+        SECTION("vector roundtrip")
+        {
+            json original =
+            {
+                {"name", "test"},
+                {"value", 42},
+                {"array", {1, 2, 3}}
+            };
+
+            std::vector<uint8_t> temp = json::to_msgpack(original);
+            // Convert the uint8_t vector to std::byte vector
+            std::vector<std::byte> msgpack_data(temp.size());
+            for (size_t i = 0; i < temp.size(); ++i)
+            {
+                msgpack_data[i] = std::byte(temp[i]);
+            }
+            // Deserialize from std::byte vector back to JSON
+            json from_bytes;
+            CHECK_NOTHROW(from_bytes = json::from_msgpack(msgpack_data));
+
+            CHECK(from_bytes == original);
+        }
+
+        SECTION("empty vector")
+        {
+            const std::vector<std::byte> empty_data;
+            CHECK_THROWS_WITH_AS([&]()
+            {
+                [[maybe_unused]] auto result = json::from_msgpack(empty_data);
+                return true;
+            }
+            (),
+            "[json.exception.parse_error.110] parse error at byte 1: syntax error while parsing MessagePack value: unexpected end of input",
+            json::parse_error&);
+        }
+
+        SECTION("comparison with workaround")
+        {
+            json original =
+            {
+                {"string", "hello"},
+                {"integer", 42},
+                {"float", 3.14},
+                {"boolean", true},
+                {"null", nullptr},
+                {"array", {1, 2, 3}},
+                {"object", {{"key", "value"}}}
+            };
+
+            std::vector<uint8_t> temp = json::to_msgpack(original);
+
+            std::vector<std::byte> msgpack_data(temp.size());
+            for (size_t i = 0; i < temp.size(); ++i)
+            {
+                msgpack_data[i] = std::byte(temp[i]);
+            }
+            // Attempt direct deserialization using std::byte input
+            const json direct_result = json::from_msgpack(msgpack_data);
+
+            // Test the workaround approach: reinterpret as unsigned char* and use iterator range
+            const auto* const char_start = reinterpret_cast<unsigned char const*>(msgpack_data.data());
+            const auto* const char_end = char_start + msgpack_data.size();
+            json workaround_result = json::from_msgpack(char_start, char_end);
+
+            // Verify that the final deserialized JSON matches the original JSON
+            CHECK(direct_result == workaround_result);
+            CHECK(direct_result == original);
+        }
+    }
+}
+#endif
+
+// the fake sizes below do not fit into a 32-bit std::size_t
+// with clang and libstdc++ 10, the std::filesystem::path conversion that
+// C++17 builds consider for every string type is ambiguous for a class
+// derived from std::string, so the string case is not tested there
+#if !(defined(__clang__) && defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 11)
+    #define JSON_TEST_BEYOND_UINT32_STRING 1
+#endif
+
+#if SIZE_MAX > UINT32_MAX
+template<typename T, typename A = std::allocator<T>>
+struct huge_array : std::vector<T, A>
+{
+    using base = std::vector<T, A>;
+    using base::base;
+
+    bool fake_size = false;
+
+    std::size_t size() const noexcept
+    {
+        if (fake_size)
+        {
+            return (std::numeric_limits<std::uint32_t>::max)() + 1ULL;
+        }
+
+        return base::size();
+    }
+};
+
+using huge_array_json = nlohmann::basic_json <
+                        std::map, huge_array, std::string, bool, std::int64_t, std::uint64_t,
+                        double, std::allocator, nlohmann::adl_serializer,
+                        std::vector<std::uint8_t>, void >;
+
+TEST_CASE("MessagePack Size above uint32 for array")
+{
+    huge_array_json j = huge_array_json::array();
+
+    j.push_back(1);
+    j.push_back(2);
+    j.push_back(3);
+
+    auto& array = j.get_ref<huge_array_json::array_t&>();
+    array.fake_size = true;
+
+    // write into a caller-owned vector: to_msgpack(j) reserves space based on
+    // the (faked) element count, which fails with bad_alloc on Windows
+    std::vector<std::uint8_t> result;
+    CHECK_THROWS_WITH_AS(
+        huge_array_json::to_msgpack(j, result),
+        "[json.exception.out_of_range.412] MessagePack length 4294967296 exceeds maximum of 4294967295",
+        json::out_of_range&);
+
+    array.fake_size = false;
+}
+
+template<typename K, typename V,
+         typename C = std::less<K>,
+         typename A = std::allocator<std::pair<const K, V>>>
+                                     struct huge_map : std::map<K, V, C, A>
+{
+    using base = std::map<K, V, C, A>;
+    using base::base;
+
+    bool fake_size = false;
+
+    std::size_t size() const noexcept
+    {
+        if (fake_size)
+        {
+            return static_cast<std::size_t>(UINT32_MAX) + 1ULL;
+        }
+
+        return base::size();
+    }
+};
+
+using huge_object_json = nlohmann::basic_json <
+                         huge_map,
+                         std::vector,
+                         std::string,
+                         bool,
+                         std::int64_t,
+                         std::uint64_t,
+                         double,
+                         std::allocator,
+                         nlohmann::adl_serializer,
+                         std::vector<std::uint8_t>,
+                         void >;
+
+TEST_CASE("MessagePack Size above uint32 for object")
+{
+
+    huge_object_json j = huge_object_json::object();
+
+    j["one"] = 1;
+    j["two"] = 2;
+
+    auto& object = j.get_ref<huge_object_json::object_t&>();
+    object.fake_size = true;
+
+    // write into a caller-owned vector: to_msgpack(j) reserves space based on
+    // the (faked) element count, which fails with bad_alloc on Windows
+    std::vector<std::uint8_t> result;
+    CHECK_THROWS_WITH_AS(
+        huge_object_json::to_msgpack(j, result),
+        "[json.exception.out_of_range.412] MessagePack length 4294967296 exceeds maximum of 4294967295",
+        json::out_of_range&);
+
+    object.fake_size = false;
+}
+
+#ifdef JSON_TEST_BEYOND_UINT32_STRING
+struct huge_string : std::string
+{
+    using std::string::string;
+
+    std::size_t size() const noexcept // NOLINT(readability-convert-member-functions-to-static)
+    {
+        return static_cast<std::size_t>(UINT32_MAX) + 1ULL;
+    }
+};
+
+using huge_string_json = nlohmann::basic_json <
+                         std::map,
+                         std::vector,
+                         huge_string,
+                         bool,
+                         std::int64_t,
+                         std::uint64_t,
+                         double,
+                         std::allocator,
+                         nlohmann::adl_serializer,
+                         std::vector<std::uint8_t>,
+                         void >;
+
+TEST_CASE("MessagePack Size above uint32 for string")
+{
+    const huge_string_json j = "hello";
+
+    CHECK_THROWS_WITH_AS(
+        huge_string_json::to_msgpack(j),
+        "[json.exception.out_of_range.412] MessagePack length 4294967296 exceeds maximum of 4294967295",
+        json::out_of_range&);
+}
+#endif
+
+struct huge_binary : std::vector<std::uint8_t>
+{
+    using std::vector<std::uint8_t>::vector;
+
+    std::size_t size() const noexcept // NOLINT(readability-convert-member-functions-to-static)
+    {
+        return static_cast<std::size_t>(UINT32_MAX) + 1ULL;
+    }
+};
+
+using huge_binary_json = nlohmann::basic_json <
+                         std::map,
+                         std::vector,
+                         std::string,
+                         bool,
+                         std::int64_t,
+                         std::uint64_t,
+                         double,
+                         std::allocator,
+                         nlohmann::adl_serializer,
+                         huge_binary,
+                         void >;
+
+TEST_CASE("MessagePack Size above uint32 for binary")
+{
+
+    huge_binary_json j = huge_binary_json::binary(huge_binary{});
+
+    j.get_binary().push_back(0x01);
+    j.get_binary().push_back(0x02);
+
+    CHECK_THROWS_WITH_AS(
+        huge_binary_json::to_msgpack(j),
+        "[json.exception.out_of_range.412] MessagePack length 4294967296 exceeds maximum of 4294967295",
+        json::out_of_range&);
+}
+#endif
+
+namespace
+{
+// types that report a size beyond UINT32_MAX without allocating that much
+// memory, so the MessagePack length limit can be tested cheaply; see the
+// similar types in unit-bson.cpp
+std::size_t beyond_uint32_size()
+{
+    return static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)()) + 1;
+}
+
+class beyond_uint32_binary_t : public std::vector<std::uint8_t>
+{
+  public:
+    using std::vector<std::uint8_t>::vector;
+
+    size_type size() const noexcept // NOLINT(readability-convert-member-functions-to-static)
+    {
+        return beyond_uint32_size();
+    }
+};
+
+#ifdef JSON_TEST_BEYOND_UINT32_STRING
+class beyond_uint32_string_t : public std::string
+{
+  public:
+    using std::string::string;
+
+    size_type size() const noexcept // NOLINT(readability-convert-member-functions-to-static)
+    {
+        return beyond_uint32_size();
+    }
+};
+
+using beyond_uint32_string_json = nlohmann::basic_json <
+                                  std::map, std::vector, beyond_uint32_string_t, bool, std::int64_t, std::uint64_t,
+                                  double, std::allocator, nlohmann::adl_serializer, std::vector<std::uint8_t>, void >;
+#endif
+
+using beyond_uint32_binary_json = nlohmann::basic_json <
+                                  std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t,
+                                  double, std::allocator, nlohmann::adl_serializer, beyond_uint32_binary_t, void >;
+} // namespace
+
+TEST_CASE("MessagePack lengths beyond UINT32_MAX cannot be serialized")
+{
+    // MessagePack stores the length of a string, binary value, array, or
+    // object in at most 32 bits; a larger one used to be written without any
+    // length at all
+#if SIZE_MAX > UINT32_MAX
+    {
+        const char* const expected = "[json.exception.out_of_range.412] MessagePack length 4294967296 exceeds maximum of 4294967295";
+
+        const beyond_uint32_binary_json binary = beyond_uint32_binary_json::binary(beyond_uint32_binary_t{});
+        CHECK_THROWS_WITH_AS(beyond_uint32_binary_json::to_msgpack(binary), expected, beyond_uint32_binary_json::out_of_range&);
+
+        const beyond_uint32_binary_json ext = beyond_uint32_binary_json::binary(beyond_uint32_binary_t{}, 42);
+        CHECK_THROWS_WITH_AS(beyond_uint32_binary_json::to_msgpack(ext), expected, beyond_uint32_binary_json::out_of_range&);
+
+#ifdef JSON_TEST_BEYOND_UINT32_STRING
+        // created from its type rather than from a beyond_uint32_string_t:
+        // that would consider the std::filesystem::path conversion, which
+        // libstdc++ 10 cannot decide for a class derived from std::string
+        const beyond_uint32_string_json string(beyond_uint32_string_json::value_t::string);
+        CHECK_THROWS_WITH_AS(beyond_uint32_string_json::to_msgpack(string), expected, beyond_uint32_string_json::out_of_range&);
+#endif
+    }
+#endif
+}
+
+TEST_CASE("MessagePack numbers use the active union member (see #5644)")
+{
+    // when number_integer_t is narrower than number_unsigned_t, to_msgpack()
+    // used to read the union member that was not the active one, writing
+    // wrong bytes for some values; std::int64_t/std::uint64_t (the default
+    // types, where both members have the same width) were not affected
+    using int32_json = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int32_t, std::uint64_t, double>;
+    using int16_json = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int16_t, std::uint64_t, double>;
+
+    SECTION("number_integer_t = std::int32_t")
+    {
+        SECTION("6442450944 (uint 64; the low 32 bits used to be sign-extended)")
+        {
+            const int32_json j = 6442450944ULL;
+            CHECK(j.is_number_unsigned());
+
+            std::vector<uint8_t> const expected{0xcf, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00, 0x00};
+            const auto result = int32_json::to_msgpack(j);
+            CHECK(result == expected);
+            CHECK(int32_json::from_msgpack(result) == j);
+        }
+
+        SECTION("4294967496 (uint 64; the low 32 bits used to be the whole value)")
+        {
+            const int32_json j = 4294967496ULL;
+            CHECK(j.is_number_unsigned());
+
+            std::vector<uint8_t> const expected{0xcf, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xc8};
+            const auto result = int32_json::to_msgpack(j);
+            CHECK(result == expected);
+            CHECK(int32_json::from_msgpack(result) == j);
+        }
+    }
+
+    SECTION("number_integer_t = std::int16_t, 98304 (uint 32)")
+    {
+        const int16_json j = 98304ULL;
+        CHECK(j.is_number_unsigned());
+
+        std::vector<uint8_t> const expected{0xce, 0x00, 0x01, 0x80, 0x00};
+        const auto result = int16_json::to_msgpack(j);
+        CHECK(result == expected);
+        CHECK(int16_json::from_msgpack(result) == j);
+    }
+
+    SECTION("default types (std::int64_t/std::uint64_t) are unaffected")
+    {
+        const json j = 4294967496ULL;
+        CHECK(j.is_number_unsigned());
+
+        std::vector<uint8_t> const expected{0xcf, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xc8};
+        const auto result = json::to_msgpack(j);
+        CHECK(result == expected);
+        CHECK(json::from_msgpack(result) == j);
+    }
+}

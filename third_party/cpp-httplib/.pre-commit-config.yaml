@@ -1,0 +1,12 @@
+repos:
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: clang-format
+        # Uses whatever `clang-format` resolves to on PATH (the Homebrew
+        # install on macOS) instead of a version pinned here, so it tracks
+        # the same version CI installs via `brew install clang-format`.
+        entry: clang-format
+        language: system
+        files: ^(httplib\.h|(example|fuzzing|test)/[^/]+\.(cpp|cc|h))$
+        args: [-i]

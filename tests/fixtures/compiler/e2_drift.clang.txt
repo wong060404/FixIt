@@ -1,0 +1,18 @@
+examples/buggy/e2_drift.cpp:47:12: error: expected ';' at end of declaration
+   47 |   int n = 3
+      |            ^
+      |            ;
+examples/buggy/e2_drift.cpp:52:8: error: no member named 'vector' in namespace 'std'
+   52 |   std::vector<std::string> words;
+      |   ~~~~~^
+examples/buggy/e2_drift.cpp:52:26: error: expected '(' for function-style cast or type construction
+   52 |   std::vector<std::string> words;
+      |               ~~~~~~~~~~~^
+examples/buggy/e2_drift.cpp:52:28: error: use of undeclared identifier 'words'
+   52 |   std::vector<std::string> words;
+      |                            ^
+examples/buggy/e2_drift.cpp:53:3: error: use of undeclared identifier 'words'
+   53 |   words.push_back("x");
+      |   ^
+fatal error: too many errors emitted, stopping now [-ferror-limit=]
+6 errors generated.
