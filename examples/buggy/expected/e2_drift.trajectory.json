@@ -1,0 +1,26 @@
+{
+  "compiler": "clang++",
+  "exit_code": 0,
+  "success": true,
+  "iterations": 2,
+  "initial_errors": 5,
+  "final_errors": 0,
+  "rounds": [
+    {
+      "round": 1,
+      "tool_calls": [
+        "patch"
+      ],
+      "errors_before": 5,
+      "errors_after": 1
+    },
+    {
+      "round": 2,
+      "tool_calls": [
+        "patch"
+      ],
+      "errors_before": 1,
+      "errors_after": 0
+    }
+  ]
+}

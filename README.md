@@ -1,0 +1,309 @@
+# FixIt
+
+**A C++ library + CLI that closes the loop between compiler output and an LLM's
+patches: compile → locate → LLM patch → fuzzy apply → re-verify.**
+
+FixIt is not another wrapper around `patch(1)`. Its patch engine is built for the
+patch a model *actually produces* — one with drifted line numbers, missing
+context, and whitespace that does not quite match — and when a patch cannot be
+applied it returns a structured explanation the model can act on, instead of an
+exit code.
+
+---
+
+## 1. What & Why
+
+Agentic C++ repair has one bottleneck that is not the model: **the patch does
+not apply.** The model writes a perfectly reasonable edit, `@@ -14,4 +14,5 @@`
+is off by two lines because the file changed, and `patch(1)` refuses the whole
+diff. The model never learns *why*, so it guesses again and burns another round.
+
+FixIt closes that circle:
+
+| Step | What FixIt does |
+|---|---|
+| compile | runs the real compiler, parses diagnostics into data (not text) |
+| locate | maps a diagnostic to its enclosing function and a numbered snippet |
+| patch | scores every plausible position with a sliding window and applies the best one |
+| re-verify | recompiles; only the compiler decides whether the repair worked |
+| on failure | returns `score`, the closest match, the exact line that differed, and a suggested re-read |
+
+## 2. Innovation
+
+1. **Fuzzy patch engine.** Every candidate position is scored
+   (`exact`/`fuzzy`/`mismatch`, normalised so a perfect hunk is `1.00`), searched
+   through the window ladder `±0 → ±1 → ±2 → ±5 → ±10 → ±50 → global`, and gated
+   at `score ≥ 0.80` with at least one exact line. Line-number drift, missing
+   context and trailing-whitespace differences all apply anyway.
+2. **Structured failure that feeds the loop.** A refused hunk yields
+   `score 0.55 < gate 0.80 … expected line 14 to contain 'return x;' but the
+   file has 'return 0;'. Closest match at line 15 … re-read lines 12-18` — text
+   designed to be pasted straight back into the next prompt.
+3. **The compiler is the only ground truth.** A model that answers `FINAL` still
+   triggers a compile; `success` is set only by a clean exit. The mock rules,
+   the trace format and the CLI all read from that one source.
+
+## 3. Quick Start
+
+```bash
+git clone <your-fork-url> fixit
+cd fixit
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure
+```
+
+Then run the section-0 acceptance command:
+
+```bash
+./build/bin/fixit examples/buggy/e1_missing_include.cpp --agent --llm mock --verbose
+```
+
+Expected: the transcript in §4, and exit code `0`. Nothing in this path touches
+the network.
+
+Requirements: CMake ≥ 3.20, a C++20 compiler (gcc 12 / clang 15 or newer), and
+Python ≥ 3.8 only if you want to regenerate the golden patches
+(`tools/gen_golden_cases.py`). Dependencies come from the vendored snapshot in
+`third_party/`; a plain checkout that lacks it falls back to `FetchContent`
+against the pinned upstream tags.
+
+## 4. Demo Transcript
+
+Recorded from a real run — the full file is [`docs/demo_output.txt`](docs/demo_output.txt).
+
+```
+══ FixIt v0.1.0 · agent mode (mock) ══
+
+── iteration 1 ----------------------------
+$ clang++ -fsyntax-only e1_missing_include.cpp
+  ✗ 5 errors
+    [E1]   L10   expected ';' at end of declaration
+    [E2]   L14   no member named 'vector' in namespace 'std'
+  → context: fn parse_count() [L9–L12]
+  → patch…
+    ✓ hunk 1 @ L9    (exact)
+── iteration 2 ----------------------------
+$ clang++ -fsyntax-only e1_missing_include.cpp
+  ✗ 1 error
+    [E1]   L11   expected ';' at end of declaration
+  → patch…
+    ✓ hunk 1 @ L11   (fuzzy, drift-1)
+$ clang++ -fsyntax-only e1_missing_include.cpp
+  ✓ clean
+✔ Fixed 5 errors in 2 iterations (0.9s)
+```
+
+`e2_drift.cpp` carries the same two bugs ~50 lines further down, so every
+`@@` position the mock emits is wrong — and the window search still repairs it.
+`e3_type_error.cpp` is deliberately outside the mock's rule set: the loop reports
+it unfixed (exit `1`) rather than pretending, which is the fixture for a real
+model.
+
+## 5. Architecture
+
+```
+              ┌──────────────────────── fixit-cli ────────────────────────┐
+              │  parse args · verbose transcript · --trace · --metrics    │
+              └───────────────┬───────────────────────────────────────────┘
+                              │
+                      ┌───────▼────────┐        structured events
+                      │  fixit::Agent  │◄────── Compile / Patch observations
+                      └───┬────────┬───┘
+        tool calls        │        │        messages + tool schemas
+      ┌───────────────────┘        └────────────────────┐
+      │                                                 │
+┌─────▼──────────┐  ┌──────────────┐  ┌──────────┐  ┌───▼─────────┐
+│ ToolRegistry   │  │ CodeMap      │  │ Compiler │  │ Llm         │
+│ compile        │  │ tree-sitter  │  │ g++ /    │  │ ├ MockLlm   │
+│ read           │  │ · functions  │  │ clang++  │  │ └ OpenAiLlm │
+│ patch ─────────┼─►│ · includes   │  │ JSON or  │  │  (httplib)  │
+└────────────────┘  │ · snippets   │  │ text     │  └─────────────┘
+                    └──────────────┘  └──────────┘
+                            │
+                    ┌───────▼────────┐
+                    │  PatchEngine   │  scoring · sliding window · gate
+                    │  (the core)    │  structured failure reports
+                    └────────────────┘
+```
+
+Everything below `Agent` is a plain library: link `libfixit` and drive the loop
+yourself, or reuse `PatchEngine` on its own to make *someone else's* diffs apply.
+
+## 6. Modules
+
+### 6.1 `fixit::Compiler` — [`include/fixit/compiler.h`](include/fixit/compiler.h)
+
+```cpp
+struct CompilerConfig {
+  std::string compiler = "g++";
+  int error_limit = 5;
+  int timeout_seconds = 30;
+  std::vector<std::string> extra_flags;
+  DiagnosticFormat format = DiagnosticFormat::Auto;  // Auto | Text | Json
+};
+
+Compiler compiler(CompilerConfig{.compiler = "clang++"});
+CompileResult result = compiler.compile("src/parse_config.cpp");
+```
+
+* Runs `<compiler> -std=c++20 -fsyntax-only -ferror-limit=N [flags] <file>` through
+  `fork`/`exec` with stdout and stderr merged into one pipe.
+* **Dialect selection is probed, not assumed.** A clang that rejects
+  `-fjson-diagnostics` is probed for `-fdiagnostics-format=json`; if neither
+  works the text parser is used, so an unusual clang degrades instead of losing
+  every diagnostic. `CompilerConfig::format` can force either parser.
+* Diagnostics are sorted by `(file, line, col, message)`, de-duplicated and
+  capped at 50. `CompileResult::clean()` is the loop's ground truth.
+* Timeout kills the child and keeps the output captured so far
+  (`timed_out == true`).
+
+### 6.2 `fixit::CodeMap` — [`include/fixit/codemap.h`](include/fixit/codemap.h)
+
+```cpp
+CodeMap map("src/parse_config.cpp");
+map.functions();                       // {name, signature, start_line, end_line}
+map.enclosing_function(14, 5);         // innermost function containing the caret
+map.includes();                        // {"<cstdio>", "\"local.h\""}
+map.context_snippet(14, 12);           //   13 |   ...
+map.has_syntax_errors();
+```
+
+`signature` is the declaration text from the first line of the definition up to
+(but excluding) the body's `{`. `context_snippet` is `%4d | text`, clamped to the
+file, which is exactly the shape a model can quote back. A missing or unparsable
+file never throws: the map degrades and `has_syntax_errors()` returns `true`.
+
+### 6.3 `fixit::PatchEngine` — [`include/fixit/patch.h`](include/fixit/patch.h) ★
+
+```cpp
+PatchEngine engine;  // PatchConfig{max_drift=200, fuzzy_line_threshold=0.8, gate=0.8}
+PatchResult result = engine.apply(file_content, unified_diff, "parse_config.cpp");
+result.all_applied;        // every hunk passed the gate
+result.new_content;        // applied hunks written, refused hunks untouched
+result.reports;            // per-hunk status, score, positions, top candidates
+result.failure_summary();  // ready to feed back to the model
+```
+
+Scoring for candidate position `p`:
+
+```
+exact(p)    = signature lines equal after trailing-whitespace normalisation
+fuzzy(p)    = lines not exactly equal but Levenshtein ratio >= 0.8
+mismatch(p) = everything else
+score(p)    = (0.6*exact + 0.3*fuzzy - 0.2*mismatch) / (0.6 * signature.size())
+```
+
+The denominator normalises by the best attainable raw score so a perfect hunk is
+`1.00` and the documented `gate = 0.8` is meaningful (see
+[`docs/decisions.md`](docs/decisions.md) ADR-002 — the literal formula in the
+original brief tops out at `0.60` and would fail its own gate). A hunk applies
+only when `score >= gate` **and** `exact >= 1`; hitting inside `±0` is `Applied`,
+anything else is `FuzzyApplied`.
+
+Failure output looks like this and is the whole point:
+
+```
+Patch failed for parse_config.cpp:
+- Hunk 1: APPLIED @ line 8 (exact, score 1.00)
+- Hunk 2: FAILED (score 0.55 < gate 0.80. Declared position line 14 but the
+  closest match is line 15 (score 0.70, exact 1/3). Window tried: +/-0..+/-50
+  plus global scan. Context mismatch: expected line 15 to contain 'return x;'
+  but the file has 'return 0;'.). Closest match at line 15
+  Suggested fix: re-read lines 12-18 and retry with corrected context.
+```
+
+### 6.4 `fixit::Agent` — [`include/fixit/agent.h`](include/fixit/agent.h)
+
+```cpp
+Agent agent(make_standard_tools(workdir), std::make_unique<MockLlm>(),
+            Compiler(CompilerConfig{.compiler = "g++"}), workdir);
+agent.set_trace_path("trace.json");
+agent.set_observer([](const Agent::Event& event) { /* live progress */ });
+AgentResult result = agent.run("parse_config.cpp", /*max_iterations=*/4);
+```
+
+The three standard tools — `compile {file}`, `read {file,start,end}`,
+`patch {file,diff}` — are in `make_standard_tools`, and any additional tool is
+just another `ToolRegistry::add`. `MockLlm` is rule-based and offline; when it
+emits a patch it deliberately declares the wrong line (`+1`), so every demo also
+exercises the fuzzy path. `OpenAiLlm` speaks `/v1/chat/completions` over
+`cpp-httplib`.
+
+## 7. Testing
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+| Suite | Contents |
+|---|---|
+| `patch_golden.test` | **60 golden patches** (10 exact, 10 line-drift, 10 whitespace, 10 missing-context, 10 extra-context, 10 multi-hunk) asserting `all_applied` and byte-exact output, plus **10 negative cases** asserting refusal, untouched content, and a `failure_reason` that contains the score, the gate, the window and the offending line |
+| `compiler.test` | 20 fixtures (recorded clang output + GCC-format output) and a gcc/clang **parity** check over `e1`–`e3`: identical `(line, col)` sets |
+| `codemap.test` | five sample files: function lists, innermost `enclosing_function`, verbatim includes, snippet format and clamping, syntax errors, missing files |
+| `agent_mock.test` | full loop on `e1`/`e2` (success, clean compile, patch reports), `e3` unfixed without crashing, trace schema, byte-identical repeat runs, tool dispatch and sandboxing |
+
+The golden cases are generated by [`tools/gen_golden_cases.py`](tools/gen_golden_cases.py)
+into `tests/patch_golden_cases.inc`, which is committed — the C++ suite never
+needs Python.
+
+Every test is offline and deterministic: `MockLlm` has no I/O, and the
+integration test asserts that two runs of the same input produce byte-identical
+traces.
+
+## 8. Reusability Justification
+
+> tree-sitter-cpp 只能解析、cpp-httplib 只能送 HTTP、diffutils 只能機械式套用 diff。
+> **沒有現成 C++ 庫能閉環「compiler diagnostics → code location → LLM patch →
+> fuzzy apply → re-verify」並把失敗原因結構化回傳給 LLM**。FixIt 補上這層，任何
+> agentic coding 工具（CI 修復 bot、IDE 插件）可直接 link。
+
+Concretely: `libfixit` installs as a normal CMake target with a header-only-style
+surface (`include/fixit/*.h`), no globals, no CLI dependency. A CI repair bot can
+use just `Compiler` + `PatchEngine`; an IDE plugin can use `CodeMap` alone; an
+agent product can take the whole `Agent`.
+
+## 9. Roadmap
+
+* **Real-LLM evaluation** — the harness is ready (`--llm openai --base-url`); the
+  fixtures and metrics need to be run against a hosted model, including the
+  `e3` case the mock deliberately refuses.
+* **Multi-file projects** — `PatchEngine::parse_diff` already returns several
+  `DiffFile`s and `Agent` can patch any of them; the missing piece is a build
+  system adapter that produces per-file diagnostics for a whole target.
+* **Package managers** — vcpkg/Conan recipes so consumers do not build
+  tree-sitter themselves.
+* **Success-rate heat map** — `--metrics` emits the JSON the Wiki chapter needs;
+  the plotting step and the video walkthrough remain.
+
+## 10. Team & Division of Work
+
+| Member (git account) | Module / artefact |
+|---|---|
+| _fill in_ | `Compiler` + compiler fixtures (`src/compiler.cpp`, `tests/compiler.test.cpp`) |
+| _fill in_ | `CodeMap` + samples (`src/codemap.cpp`, `tests/codemap.test.cpp`) |
+| _fill in_ | `PatchEngine` + golden patches (`src/patch.cpp`, `tests/patch_golden.test.cpp`) |
+| _fill in_ | `Agent` + LLM backends + CLI (`src/agent.cpp`, `src/*_llm.cpp`, `tools/fixit-cli/`) |
+| _fill in_ | CI, docs, Wiki, demo video (`.github/workflows/ci.yml`, `docs/`, `README.md`) |
+
+## Layout
+
+```
+fixit/
+├── include/fixit/{compiler,codemap,patch,agent,types}.h
+├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm}.cpp
+├── tools/fixit-cli/main.cpp
+├── tools/{gen_golden_cases.py,record_demo.sh,record_compiler_fixtures.sh}
+├── tests/{patch_golden,compiler,codemap,agent_mock}.test.cpp
+├── tests/fixtures/{compiler,codemap}/
+├── examples/buggy/{e1_missing_include,e2_drift,e3_type_error}.cpp
+├── examples/buggy/expected/
+├── docs/{decisions.md,demo_output.txt}
+└── third_party/            # pinned snapshot; FetchContent is the fallback
+```
+
+## Design decisions
+
+Every ambiguity in the original brief is resolved and recorded in
+[`docs/decisions.md`](docs/decisions.md) (ADR format: context / decision /
+rationale) — the scoring normalisation, the window ladder, partial-apply
+semantics, the mock's deliberate drift, dependency pinning, the API-key policy,
+and the platform notes.

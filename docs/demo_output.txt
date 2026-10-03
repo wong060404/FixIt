@@ -1,0 +1,252 @@
+FixIt v0.1.0 -- recorded demo transcript
+compiler: Apple clang version 17.0.0 (clang-1700.0.13.5)
+platform: Darwin arm64
+NO_COLOR=1 (ANSI colour stripped so this file is diffable)
+
+NOTE: e1 and e2 are repaired by the deterministic mock model (exit 0).
+      e3 is deliberately beyond the mock's rule set and is reported as
+      unfixed (exit 1) -- it is the fixture for a real LLM.
+
+========================================================================
+$ fixit e1_missing_include.cpp --agent --llm mock --verbose --compiler clang++
+========================================================================
+══ FixIt v0.1.0 · agent mode (mock) ══
+
+── iteration 1 ----------------------------
+$ clang++ -fsyntax-only e1_missing_include.cpp
+  ✗ 5 errors
+    [E1]   L10   expected ';' at end of declaration
+    [E2]   L14   no member named 'vector' in namespace 'std'
+    [E3]   L14   expected '(' for function-style cast or type construction
+    [E4]   L14   use of undeclared identifier 'words'
+    [E5]   L14   expected expression
+  → context: fn parse_count() [L9–L12]
+  → patch…
+    ✓ hunk 1 @ L9    (exact)
+── iteration 2 ----------------------------
+$ clang++ -fsyntax-only e1_missing_include.cpp
+  ✗ 1 error
+    [E1]   L11   expected ';' at end of declaration
+  → context: fn parse_count() [L10–L13]
+  → patch…
+    ✓ hunk 1 @ L11   (fuzzy, drift-1)
+$ clang++ -fsyntax-only e1_missing_include.cpp
+  ✓ clean
+✔ Fixed 5 errors in 2 iterations (4.6s)
+
+========================================================================
+$ fixit e2_drift.cpp --agent --llm mock --verbose --compiler clang++
+========================================================================
+══ FixIt v0.1.0 · agent mode (mock) ══
+
+── iteration 1 ----------------------------
+$ clang++ -fsyntax-only e2_drift.cpp
+  ✗ 5 errors
+    [E1]   L47   expected ';' at end of declaration
+    [E2]   L52   no member named 'vector' in namespace 'std'
+    [E3]   L52   expected '(' for function-style cast or type construction
+    [E4]   L52   use of undeclared identifier 'words'
+    [E5]   L53   use of undeclared identifier 'words'
+  → context: fn parse_count() [L46–L49]
+  → patch…
+    ✓ hunk 1 @ L7    (exact)
+── iteration 2 ----------------------------
+$ clang++ -fsyntax-only e2_drift.cpp
+  ✗ 1 error
+    [E1]   L48   expected ';' at end of declaration
+  → context: fn parse_count() [L47–L50]
+  → patch…
+    ✓ hunk 1 @ L48   (fuzzy, drift-1)
+$ clang++ -fsyntax-only e2_drift.cpp
+  ✓ clean
+✔ Fixed 5 errors in 2 iterations (4.5s)
+
+========================================================================
+$ fixit e3_type_error.cpp --agent --llm mock --verbose --compiler clang++
+========================================================================
+══ FixIt v0.1.0 · agent mode (mock) ══
+
+── iteration 1 ----------------------------
+$ clang++ -fsyntax-only e3_type_error.cpp
+  ✗ 2 errors
+    [E1]   L13   no matching function for call to 'count_words'
+    [E2]   L14   use of undeclared identifier 'count_missing_words'
+  → context: fn main() [L11–L16]
+✗ Not fixed after 1 iterations (2.4s)
+  remaining errors:
+    [E1]   L13   no matching function for call to 'count_words'
+    [E2]   L14   use of undeclared identifier 'count_missing_words'
+
+========================================================================
+trajectory for e1 (deterministic; timestamps excluded by design)
+========================================================================
+[
+    {
+        "compile_after": {
+            "clean": false,
+            "errors": [
+                {
+                    "col": 12,
+                    "context_line": "11 |    int n = 3",
+                    "file": "e1_missing_include.cpp",
+                    "line": 11,
+                    "message": "expected ';' at end of declaration"
+                }
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "warnings": []
+        },
+        "compile_before": {
+            "clean": false,
+            "errors": [
+                {
+                    "col": 12,
+                    "context_line": "10 |    int n = 3",
+                    "file": "e1_missing_include.cpp",
+                    "line": 10,
+                    "message": "expected ';' at end of declaration"
+                },
+                {
+                    "col": 19,
+                    "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {",
+                    "file": "e1_missing_include.cpp",
+                    "line": 14,
+                    "message": "no member named 'vector' in namespace 'std'"
+                },
+                {
+                    "col": 37,
+                    "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {",
+                    "file": "e1_missing_include.cpp",
+                    "line": 14,
+                    "message": "expected '(' for function-style cast or type construction"
+                },
+                {
+                    "col": 40,
+                    "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {",
+                    "file": "e1_missing_include.cpp",
+                    "line": 14,
+                    "message": "use of undeclared identifier 'words'"
+                },
+                {
+                    "col": 47,
+                    "context_line": "14 |  int add_word(std::vector<std::string>& words, const std::string& word) {",
+                    "file": "e1_missing_include.cpp",
+                    "line": 14,
+                    "message": "expected expression"
+                }
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "warnings": []
+        },
+        "observations": [
+            {
+                "result": {
+                    "all_applied": true,
+                    "failure_summary": "Patch applied for e1_missing_include.cpp:\n- Hunk 1: APPLIED @ line 9 (exact, score 1.00)\n",
+                    "reports": [
+                        {
+                            "declared_pos": 9,
+                            "hunk": 1,
+                            "matched_pos": 9,
+                            "score": 1.0,
+                            "status": "applied"
+                        }
+                    ]
+                },
+                "tool": "patch"
+            }
+        ],
+        "round": 1,
+        "tool_calls": [
+            {
+                "args": {
+                    "diff": "--- a/e1_missing_include.cpp\n+++ b/e1_missing_include.cpp\n@@ -9,0 +9,0 @@\n+#include <vector>\n",
+                    "file": "e1_missing_include.cpp"
+                },
+                "name": "patch"
+            }
+        ]
+    },
+    {
+        "compile_after": {
+            "clean": true,
+            "errors": [],
+            "exit_code": 0,
+            "timed_out": false,
+            "warnings": []
+        },
+        "compile_before": {
+            "clean": false,
+            "errors": [
+                {
+                    "col": 12,
+                    "context_line": "11 |    int n = 3",
+                    "file": "e1_missing_include.cpp",
+                    "line": 11,
+                    "message": "expected ';' at end of declaration"
+                }
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "warnings": []
+        },
+        "observations": [
+            {
+                "result": {
+                    "all_applied": true,
+                    "failure_summary": "Patch applied for e1_missing_include.cpp:\n- Hunk 1: APPLIED @ line 11 (fuzzy, score 1.00)\n",
+                    "reports": [
+                        {
+                            "declared_pos": 12,
+                            "hunk": 1,
+                            "matched_pos": 11,
+                            "score": 1.0,
+                            "status": "fuzzy_applied"
+                        }
+                    ]
+                },
+                "tool": "patch"
+            }
+        ],
+        "round": 2,
+        "tool_calls": [
+            {
+                "args": {
+                    "diff": "--- a/e1_missing_include.cpp\n+++ b/e1_missing_include.cpp\n@@ -12,1 +12,1 @@\n-  int n = 3\n+  int n = 3;\n",
+                    "file": "e1_missing_include.cpp"
+                },
+                "name": "patch"
+            }
+        ]
+    }
+]
+
+========================================================================
+final content of the repaired e1
+========================================================================
+// e1_missing_include.cpp -- two injected bugs, both repaired by the mock rules:
+//   1. std::vector is used without pulling in <vector>
+//   2. the `int n = 3` line is missing its semicolon
+// They sit in different functions so every compiler reports them in source
+// order, and the missing ';' masks the header error on clang's first pass --
+// which is exactly the situation the repair loop exists for.
+#include <string>
+
+#include <vector>
+int parse_count(const std::string& text) {
+  int n = 3;
+  return n;
+}
+
+int add_word(std::vector<std::string>& words, const std::string& word) {
+  words.push_back(word);
+  return static_cast<int>(words.size());
+}
+
+int main() {
+  std::vector<std::string> words;
+  add_word(words, "x");
+  return parse_count("x");
+}

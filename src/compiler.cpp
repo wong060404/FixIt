@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <sys/stat.h>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -394,6 +396,29 @@ DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_
   DiagnosticFlags flags;
   if (!looks_like_clang(compiler)) return flags;  // GCC dialect, no JSON flag
 
+  // Probing spawns the compiler twice, and a repair loop constructs a few
+  // Compiler objects.  Cache per (compiler, binary mtime) so the cost is paid
+  // once while a rebuilt compiler is still re-probed.
+  struct CacheEntry {
+    std::string key;
+    std::int64_t mtime = 0;
+    DiagnosticFlags flags;
+  };
+  static std::mutex cache_mutex;
+  static std::vector<CacheEntry> cache;
+  const auto mtime_of = [](const std::string& path) -> std::int64_t {
+    struct stat info {};
+    if (::stat(path.c_str(), &info) != 0) return 0;
+    return static_cast<std::int64_t>(info.st_mtime);
+  };
+  const CacheEntry key_entry{compiler, mtime_of(compiler), {}};
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    for (const CacheEntry& entry : cache) {
+      if (entry.key == key_entry.key && entry.mtime == key_entry.mtime) return entry.flags;
+    }
+  }
+
   // An empty translation unit: any JSON-supported compiler succeeds silently.
   static const char kEmpty[] = "// fixit diagnostic-format probe\n";
   const TempFile probe(kEmpty);
@@ -413,15 +438,18 @@ DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_
   if (accepts("-fjson-diagnostics")) {
     flags.uses_json = true;
     flags.json_flag = "-fjson-diagnostics";
-    return flags;
-  }
-  if (accepts("-fdiagnostics-format=json")) {
+  } else if (accepts("-fdiagnostics-format=json")) {
     flags.uses_json = true;
     flags.json_flag = "-fdiagnostics-format=json";
-    return flags;
+  } else {
+    // Clang that supports neither flag: the text fallback keeps diagnostics usable.
+    flags.uses_json = false;
   }
-  // Clang that supports neither flag: text fallback keeps diagnostics usable.
-  flags.uses_json = false;
+
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    cache.push_back(CacheEntry{compiler, mtime_of(compiler), flags});
+  }
   return flags;
 }
 

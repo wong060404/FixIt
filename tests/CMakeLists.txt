@@ -33,3 +33,5 @@ fixit_add_test(patch_golden.test patch_golden.test.cpp)
 fixit_add_test(compiler.test compiler.test.cpp)
 fixit_add_test(codemap.test codemap.test.cpp)
 fixit_add_test(agent_mock.test agent_mock.test.cpp)
+
+fixit_add_test(expected_artifacts.test expected_artifacts.test.cpp)

@@ -334,14 +334,19 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
 
     const LlmResponse response = llm_->chat(messages, specs);
 
-    nlohmann::json round_entry = {{"round", round}, {"tool_calls", nlohmann::json::array()}};
+    nlohmann::json round_entry = {{"round", round},
+                                  {"tool_calls", nlohmann::json::array()},
+                                  {"compile_before", diagnostics_to_json(compiled)}};
     if (!response.content.empty()) round_entry["assistant"] = response.content;
 
     if (response.is_final) {
       round_entry["llm_final"] = true;
-      trace.push_back(std::move(round_entry));
-      // A FINAL claim is only worth what the compiler says it is worth.
+      // A FINAL claim is only worth what the compiler says it is worth, so the
+      // round still ends with a verification compile -- and the trace records it
+      // exactly like a tool round.
       compiled = compiler_.compile(source_path);
+      round_entry["compile_after"] = diagnostics_to_json(compiled);
+      trace.push_back(std::move(round_entry));
       result.final_errors = compiled.diagnostics;
       result.success = compiled.clean();
       break;
