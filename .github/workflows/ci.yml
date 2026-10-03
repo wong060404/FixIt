@@ -62,15 +62,19 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       # The demos are part of the acceptance criteria: e1 and e2 must be fixed
-      # by the mock (exit 0) and e3 must be left alone (exit 1).
+      # by the mock (exit 0) and e3 must be left alone (exit 1).  --no-write
+      # repairs a scratch copy so the checkout stays clean.
       - name: Demo smoke test
         shell: bash
         run: |
-          set -x
-          tmp="$(mktemp -d)"
-          cp examples/buggy/*.cpp "$tmp"/
-          ( cd "$tmp" && "$GITHUB_WORKSPACE/build/bin/fixit" e1_missing_include.cpp --agent --llm mock --verbose --compiler ${{ matrix.cxx }} )
-          ( cd "$tmp" && "$GITHUB_WORKSPACE/build/bin/fixit" e2_drift.cpp --agent --llm mock --compiler ${{ matrix.cxx }} )
-          if ( cd "$tmp" && "$GITHUB_WORKSPACE/build/bin/fixit" e3_type_error.cpp --agent --llm mock --compiler ${{ matrix.cxx }} ); then
+          set -eux
+          BIN="$GITHUB_WORKSPACE/build/bin/fixit"
+          "$BIN" examples/buggy/e1_missing_include.cpp --agent --llm mock --verbose \
+            --compiler ${{ matrix.cxx }} --no-write
+          "$BIN" examples/buggy/e2_drift.cpp --agent --llm mock \
+            --compiler ${{ matrix.cxx }} --no-write
+          if "$BIN" examples/buggy/e3_type_error.cpp --agent --llm mock \
+               --compiler ${{ matrix.cxx }} --no-write; then
             echo "e3 must NOT be fixed by the mock rules"; exit 1
           fi
+          git diff --exit-code   # the demos must not have touched the tree

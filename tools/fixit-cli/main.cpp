@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -63,6 +64,7 @@ struct Options {
   std::string trace;
   std::string metrics;
   std::string compiler = "g++";
+  bool no_write = false;  ///< repair a scratch copy and leave the tree untouched
 };
 
 void usage() {
@@ -79,6 +81,8 @@ void usage() {
   --trace PATH            write the deterministic JSON trace
   --metrics PATH          write patch/fix statistics as JSON
   --compiler NAME         compiler binary (default: g++)
+  --no-write              repair a scratch copy; the source file is left as is
+                          (useful for repeatable demos and CI smoke tests)
   -h, --help              this message
 
 Exit codes: 0 clean or fixed, 1 not fixed, 2 usage error, 3 internal error.
@@ -107,6 +111,8 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
     }
     if (arg == "--agent") {
       options.agent = true;
+    } else if (arg == "--no-write") {
+      options.no_write = true;
     } else if (arg == "--verbose") {
       options.verbose = true;
     } else if (arg == "--llm") {
@@ -255,12 +261,16 @@ int main(int argc, char** argv) {
   if (!parsed) return exit_code;
   const Options options = *parsed;
 
+  std::string original_content;
   {
-    std::ifstream probe(options.file);
+    std::ifstream probe(options.file, std::ios::binary);
     if (!probe) {
       std::cerr << "fixit: cannot open '" << options.file << "'\n";
       return 2;
     }
+    std::ostringstream buffer;
+    buffer << probe.rdbuf();
+    original_content = buffer.str();
   }
 
   if (options.llm == "openai" && options.api_key.empty()) {
@@ -277,8 +287,30 @@ int main(int argc, char** argv) {
   config.compiler = options.compiler;
   const fixit::Compiler compiler(config);
 
+  // --no-write repairs a private copy in a scratch directory, so the working
+  // tree is byte-identical afterwards and the demo can be repeated verbatim.
+  std::string scratch_dir;
+  std::string target_file = options.file;
+  if (options.no_write) {
+    std::error_code error;
+    const std::filesystem::path scratch =
+        std::filesystem::temp_directory_path(error) /
+        ("fixit-no-write-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(scratch, error);
+    std::filesystem::copy_file(options.file, scratch / basename_of(options.file),
+                               std::filesystem::copy_options::overwrite_existing, error);
+    scratch_dir = scratch.string();
+    target_file = (scratch / basename_of(options.file)).string();
+  }
+  const auto cleanup_scratch = [&] {
+    if (!scratch_dir.empty()) {
+      std::error_code error;
+      std::filesystem::remove_all(scratch_dir, error);
+    }
+  };
+
   const std::string display_file = basename_of(options.file);
-  const std::string workdir = dirname_of(options.file);
+  const std::string workdir = options.no_write ? scratch_dir : dirname_of(options.file);
 
   const auto started = std::chrono::steady_clock::now();
   const auto elapsed = [&] {
@@ -287,14 +319,17 @@ int main(int argc, char** argv) {
 
   // ---- compile-only mode ---------------------------------------------------
   if (!options.agent) {
-    const fixit::CompileResult result = compiler.compile(options.file);
+    const fixit::CompileResult result = compiler.compile(target_file);
+    cleanup_scratch();
     std::cout << "══ FixIt v" << kVersion << " · compile mode (" << options.compiler << ") ══\n\n";
     std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only " << display_file << "\n";
     if (result.clean()) {
       std::cout << "  " << green("✓ clean") << "\n";
       return 0;
     }
-    std::cout << "  " << red("✗ " + std::to_string(result.error_count()) + " errors") << "\n";
+    std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
+                             (result.error_count() == 1 ? " error" : " errors"))
+              << "\n";
     print_errors(result, "    ");
     return 1;
   }
@@ -377,7 +412,7 @@ int main(int argc, char** argv) {
       print_errors(event.compile, "    ");
 
       if (!event.compile.diagnostics.empty()) {
-        fixit::CodeMap map(options.file);
+        fixit::CodeMap map(target_file);
         if (const auto fn = map.enclosing_function(event.compile.diagnostics.front().line, 1)) {
           std::cout << "  " << yellow("→ context: fn " + fn->name + "() [L" +
                                       std::to_string(fn->start_line) + "–L" +
@@ -410,6 +445,7 @@ int main(int argc, char** argv) {
   });
 
   const fixit::AgentResult result = agent.run(display_file, options.iterations);
+  cleanup_scratch();
 
   if (!options.verbose) {
     for (const auto& [round, patch] : result.patches) {

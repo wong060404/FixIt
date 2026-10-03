@@ -60,6 +60,10 @@ Then run the section-0 acceptance command:
 Expected: the transcript in §4, and exit code `0`. Nothing in this path touches
 the network.
 
+That command repairs the example in place. Add `--no-write` to repair a scratch
+copy instead and leave the working tree byte-identical — which is what the CI
+smoke test and the recorded demo use, so both can be re-run at any time.
+
 Requirements: CMake ≥ 3.20, a C++20 compiler (gcc 12 / clang 15 or newer), and
 Python ≥ 3.8 only if you want to regenerate the golden patches
 (`tools/gen_golden_cases.py`). Dependencies come from the vendored snapshot in
@@ -227,6 +231,21 @@ just another `ToolRegistry::add`. `MockLlm` is rule-based and offline; when it
 emits a patch it deliberately declares the wrong line (`+1`), so every demo also
 exercises the fuzzy path. `OpenAiLlm` speaks `/v1/chat/completions` over
 `cpp-httplib`.
+
+### 6.5 CLI
+
+```
+fixit <file.cpp> [--agent] [--llm mock|openai] [--model NAME]
+      [--base-url URL] [--api-key KEY | env FIXIT_API_KEY]
+      [--iterations N] [--verbose] [--trace PATH] [--metrics PATH]
+      [--compiler NAME] [--no-write]
+```
+
+Without `--agent` it compiles once and prints the diagnostics. Exit codes:
+`0` clean or repaired, `1` not repaired, `2` usage error (including
+`--llm openai` without a key), `3` internal error. ANSI colour is suppressed when
+stdout is not a TTY or `NO_COLOR` is set, which keeps `docs/demo_output.txt`
+diffable.
 
 ## 7. Testing
 
