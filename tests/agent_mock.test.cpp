@@ -186,6 +186,23 @@ TEST_CASE("e2 tolerates 50 lines of drift", "[agent][integration]") {
   scratch.seed("e2_drift.cpp");
   RunOutcome outcome = run_agent("e2_drift.cpp", scratch.path());
 
+  // Report what the compiler actually said and what the loop did, so a failure
+  // on a toolchain we cannot log into explains itself.
+  const fixit::CompileResult seed = make_compiler().compile(
+      (scratch.path() / "e2_drift.cpp").string());
+  INFO("seed exit=" << seed.exit_code << " errors=" << seed.error_count());
+  INFO("seed raw=[" << seed.raw_output << "]");
+  for (const fixit::Diagnostic& d : seed.diagnostics) {
+    INFO("  L" << d.line << " C" << d.col << " [" << d.message << "]");
+  }
+  INFO("agent success=" << outcome.result.success
+                        << " iterations=" << outcome.result.iterations
+                        << " patches=" << outcome.result.patches.size());
+  for (const auto& [round, patch] : outcome.result.patches) {
+    INFO("  round " << round << ": " << patch.failure_summary("e2_drift.cpp"));
+  }
+  INFO("final content=[" << outcome.final_content << "]");
+
   CHECK(outcome.result.success);
   CHECK(outcome.final_content.find("#include <vector>") != std::string::npos);
   CHECK(outcome.final_content.find("  int n = 3;") != std::string::npos);
