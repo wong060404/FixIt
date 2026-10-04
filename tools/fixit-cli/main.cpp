@@ -69,8 +69,8 @@ struct Options {
   bool outline = false;     ///< print the CodeMap view of the file and stop
 };
 
-void usage() {
-  std::cout <<
+void usage(std::ostream& out) {
+  out <<
       R"(Usage: fixit <file.cpp> [options]
 
   --agent                 run the repair loop instead of a single compile
@@ -111,7 +111,7 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
-      usage();
+      usage(std::cout);
       exit_code = 0;
       return std::nullopt;
     }
@@ -179,6 +179,7 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
 
   if (positional.size() != 1) {
     std::cerr << "fixit: exactly one source file is required\n";
+    // The caller prints the usage text to stderr; --help prints it to stdout.
     exit_code = 2;
     return std::nullopt;
   }
@@ -268,11 +269,23 @@ int main(int argc, char** argv) {
 
   int exit_code = 3;
   const std::optional<Options> parsed = parse_args(argc, argv, exit_code);
-  if (!parsed) return exit_code;
+  if (!parsed) {
+    // A usage mistake deserves the usage text, not just one line of complaint.
+    if (exit_code == 2) usage(std::cerr);
+    return exit_code;
+  }
   const Options options = *parsed;
 
   std::string original_content;
   {
+    // A directory opens successfully with std::ifstream, and the compiler then
+    // reports nothing for it -- which used to read as "clean".  Require a
+    // regular file so an obvious typo can never look like a passing build.
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(options.file, error)) {
+      std::cerr << "fixit: '" << options.file << "' is not a readable file\n";
+      return 2;
+    }
     std::ifstream probe(options.file, std::ios::binary);
     if (!probe) {
       std::cerr << "fixit: cannot open '" << options.file << "'\n";

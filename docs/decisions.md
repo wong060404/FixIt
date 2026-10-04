@@ -438,3 +438,22 @@ shapes:
 structure rides along with the read the model already does.  This also gives
 `--outline` a natural CI use: it fails visibly on a syntax-broken tree without
 running a compiler.
+
+---
+
+## ADR-021 — The CLI's contract is tested through the binary
+
+**Context.** Every library module had tests, but nothing checked the wiring a user
+actually touches: exit codes, argument handling, and the two flags added for
+reproducibility.  A first smoke pass immediately found that passing a *directory*
+as the source file exited `0` and printed "clean" — a false green build.
+
+**Decision.** `cli_contract.test` runs the built binary with `popen` and asserts
+the observable contract: usage errors (including that a directory is rejected
+with the usage text), compile mode's `0`/`1`, `--outline` content, `--no-write`
+leaving the source byte-identical, `--no-timing` producing no wall-clock value,
+and `--llm openai` without a key exiting `2`.  Usage mistakes now print the usage
+text to stderr; `--help` still prints it to stdout and exits `0`.
+
+**Rationale.** The library can be perfectly correct while the executable still
+misreports success, and "exit 0" is the one output a CI bot trusts.

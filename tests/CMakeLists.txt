@@ -20,7 +20,8 @@ function(fixit_add_test name)
     FIXIT_FIXTURES_DIR="${FIXIT_FIXTURES_DIR}"
     FIXIT_EXAMPLES_DIR="${FIXIT_EXAMPLES_DIR}"
     FIXIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-    FIXIT_TEST_COMPILER="${FIXIT_TEST_COMPILER}")
+    FIXIT_TEST_COMPILER="${FIXIT_TEST_COMPILER}"
+    FIXIT_CLI_PATH="${CMAKE_BINARY_DIR}/bin/fixit")
   if(NOT MSVC)
     target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
   endif()
@@ -35,3 +36,4 @@ fixit_add_test(codemap.test codemap.test.cpp)
 fixit_add_test(agent_mock.test agent_mock.test.cpp)
 
 fixit_add_test(expected_artifacts.test expected_artifacts.test.cpp)
+fixit_add_test(cli_contract.test cli_contract.test.cpp)
