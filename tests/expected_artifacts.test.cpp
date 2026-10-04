@@ -35,6 +35,18 @@ std::string slurp(const fs::path& path) {
 
 fs::path examples_dir() { return fs::path(FIXIT_EXAMPLES_DIR) / "buggy"; }
 
+/// Constructing a Compiler probes the diagnostic dialect; do it once.
+const fixit::Compiler& test_compiler() {
+  static const fixit::Compiler compiler = [] {
+    fixit::CompilerConfig config;
+#ifdef FIXIT_TEST_COMPILER
+    config.compiler = FIXIT_TEST_COMPILER;
+#endif
+    return fixit::Compiler(config);
+  }();
+  return compiler;
+}
+
 struct Example {
   std::string name;
   bool should_succeed;
@@ -107,12 +119,8 @@ TEST_CASE("the recorded expected content is what the mock loop produces", "[expe
       fs::copy_file(examples_dir() / (example.name + ".cpp"), work / (example.name + ".cpp"),
                     fs::copy_options::overwrite_existing);
 
-      fixit::CompilerConfig config;
-#ifdef FIXIT_TEST_COMPILER
-      config.compiler = FIXIT_TEST_COMPILER;
-#endif
       fixit::Agent agent(fixit::make_standard_tools(work.string()),
-                         std::make_unique<fixit::MockLlm>(), fixit::Compiler(config), work.string());
+                         std::make_unique<fixit::MockLlm>(), test_compiler(), work.string());
       const fixit::AgentResult result = agent.run(example.name + ".cpp", 4);
 
       CHECK(result.success == example.should_succeed);

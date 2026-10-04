@@ -74,14 +74,20 @@ class Scratch {
   fs::path path_;
 };
 
-fixit::Compiler make_compiler() {
-  fixit::CompilerConfig config;
-  // The tests need a compiler that exists; CXX is set by CMake.
+/// A single compiler for the whole suite: constructing one probes the dialect,
+/// and every case here would otherwise pay that cost again.
+const fixit::Compiler& shared_compiler() {
+  static const fixit::Compiler compiler = [] {
+    fixit::CompilerConfig config;
 #ifdef FIXIT_TEST_COMPILER
-  config.compiler = FIXIT_TEST_COMPILER;
+    config.compiler = FIXIT_TEST_COMPILER;
 #endif
-  return fixit::Compiler(config);
+    return fixit::Compiler(config);
+  }();
+  return compiler;
 }
+
+fixit::Compiler make_compiler() { return shared_compiler(); }
 
 struct RunOutcome {
   fixit::AgentResult result;
@@ -107,7 +113,7 @@ RunOutcome run_agent(const std::string& example, const fs::path& scratch, int it
 
 /// True when the compiler is happy with `path`.
 bool compiles_clean(const fs::path& path) {
-  const fixit::CompileResult result = make_compiler().compile(path.string());
+  const fixit::CompileResult result = shared_compiler().compile(path.string());
   return result.clean();
 }
 
