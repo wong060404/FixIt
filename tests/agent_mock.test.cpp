@@ -501,14 +501,38 @@ namespace {
 /// Feeds the mock a compile payload with one diagnostic and reports whether it
 /// proposed a patch.  `workdir` must contain `victim.cpp`: the include rule reads
 /// the real file to find where the last #include is.
-bool mock_repairs_message(const std::string& workdir, const std::string& message) {
+/// Line the mock's proposed patch targets, or 0 when it proposed none.
+int mock_patch_target_line(const std::string& workdir, const std::string& message, int line) {
   fixit::MockLlm mock;
   mock.set_workspace(workdir);
   const std::string payload =
       std::string("Task: x\nFile: victim.cpp\nCompile result:\n") +
       nlohmann::json{{"clean", false},
                      {"errors", nlohmann::json::array({nlohmann::json{{"file", "victim.cpp"},
-                                                                     {"line", 10},
+                                                                     {"line", line},
+                                                                     {"col", 3},
+                                                                     {"message", message}}})}}
+          .dump(2);
+  const std::vector<fixit::Message> messages = {
+      fixit::Message{"user", payload, nlohmann::json::array(), nlohmann::json()}};
+  const fixit::LlmResponse response = mock.chat(messages, {});
+  if (response.tool_calls.empty()) return 0;
+  const std::string diff = response.tool_calls.front().args.value("diff", std::string());
+  // The first @@ header carries the declared start position.
+  const std::size_t at = diff.find("@@ -");
+  if (at == std::string::npos) return 0;
+  return std::atoi(diff.c_str() + at + 4);
+}
+
+bool mock_repairs_message(const std::string& workdir, const std::string& message,
+                          int line = 4) {
+  fixit::MockLlm mock;
+  mock.set_workspace(workdir);
+  const std::string payload =
+      std::string("Task: x\nFile: victim.cpp\nCompile result:\n") +
+      nlohmann::json{{"clean", false},
+                     {"errors", nlohmann::json::array({nlohmann::json{{"file", "victim.cpp"},
+                                                                     {"line", line},
                                                                      {"col", 3},
                                                                      {"message", message}}})}}
           .dump(2);
@@ -556,8 +580,35 @@ TEST_CASE("the mock recognises each compiler's real wording", "[agent][mock][wor
              "}\n");                         // 11
 
   for (const std::string& message : repairable) {
-    INFO("message: " << message);
-    CHECK(mock_repairs_message(scratch.path().string(), message));
+    // The semicolon wordings are anchored differently, as each compiler reports
+    // them: clang on the incomplete line (4), GCC on the next token (5).
+    const bool semicolon = message.find("';'") != std::string::npos;
+    const int line = semicolon && message.find(" before ") != std::string::npos ? 5 : 4;
+    INFO("message: " << message << " (line " << line << ")");
+    CHECK(mock_repairs_message(scratch.path().string(), message, line));
+  }
+
+  // A missing semicolon on line 4 (`  int n = 3`) is reported differently by each
+  // compiler, and both forms must repair *that* line:
+  //   clang anchors on the incomplete line itself;
+  //   GCC's "before X" form points at the token that follows it.
+  // The mock must therefore subtract one for the GCC wording, not blindly trust
+  // the reported line.  Deriving this from the CI log alone was ambiguous, so it
+  // is pinned here as a constraint instead.
+  SECTION("both semicolon wordings repair the same line") {
+    // The mock deliberately declares one line past the truth (the +1 drift the
+    // brief requires, so every demo exercises the fuzzy path).  The two wordings
+    // must therefore land on the *same* declared line: clang reports the
+    // incomplete line 4 directly, GCC reports line 5 with "before", and the mock
+    // subtracts one.  Both become declared 5 after the deliberate drift.
+    const int clang_target =
+        mock_patch_target_line(scratch.path().string(), "expected ';' at end of declaration", 4);
+    const int gcc_target = mock_patch_target_line(
+        scratch.path().string(), "expected ',' or ';' before 'return'", 5);
+    INFO("clang targets declared line " << clang_target << ", gcc " << gcc_target);
+    CHECK(clang_target == 5);
+    CHECK(gcc_target == 5);
+    CHECK(clang_target == gcc_target);
   }
 
   // Errors the mock has no rule for must still not produce a patch (R4): these

@@ -325,10 +325,32 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
 
       const std::vector<std::string> lines = read_all_lines(resolve(error.file));
       if (static_cast<std::size_t>(error.line) > lines.size()) continue;
-      const std::string original = lines[static_cast<std::size_t>(error.line) - 1];
-      if (!original.empty() && original.back() == ';') continue;  // already repaired
 
-      add_hunk(error.file, error.line, "-" + original + "\n+" + original + ";\n");
+      // Which line is missing the semicolon?  The compilers anchor this
+      // differently, and the "before X" form points at the token that follows the
+      // incomplete line rather than at the line itself:
+      //   clang: "expected ';' at end of declaration"   -> the incomplete line
+      //   GCC  : "expected ',' or ';' before 'return'"  -> the next line
+      // Instead of trusting one interpretation, try the reported line and then the
+      // line above it, and repair the first one that plausibly needs a semicolon.
+      // That accepts either anchor without guessing which compiler produced it.
+      const int reported = error.line;
+      const int alternates[2] = {reported, reported - 1};
+      for (int candidate : alternates) {
+        if (candidate < 1 || static_cast<std::size_t>(candidate) > lines.size()) continue;
+        const std::string original = lines[static_cast<std::size_t>(candidate) - 1];
+        const std::string trimmed = normalize_line(original);
+        if (trimmed.empty()) continue;
+        if (trimmed.back() == ';') continue;  // already repaired; try the other line
+        // Appending a semicolon to a brace, a label or a preprocessor line never
+        // helps; a real statement does not end in one of those.
+        if (trimmed.back() == '{' || trimmed.back() == '}' || trimmed.back() == ':' ||
+            trimmed[0] == '#') {
+          continue;
+        }
+        add_hunk(error.file, candidate, "-" + original + "\n+" + original + ";\n");
+        break;
+      }
     }
   }
 
