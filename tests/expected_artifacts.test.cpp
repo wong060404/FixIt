@@ -10,6 +10,7 @@
 // the loop's own budget: how many rounds a compiler needs is a property of that
 // compiler's error recovery, not of FixIt.
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>

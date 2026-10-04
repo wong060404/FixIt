@@ -1,6 +1,7 @@
 #pragma once
 // fixit::CodeMap -- structural view of a single translation unit (tree-sitter).
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>

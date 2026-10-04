@@ -1,5 +1,6 @@
 #include "fixit/compiler.h"
 
+#include <cstddef>
 #include <algorithm>
 #include <array>
 #include <cctype>

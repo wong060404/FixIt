@@ -1,5 +1,7 @@
 #include "fixit/agent.h"
 
+#include <vector>
+#include <cstddef>
 #include <algorithm>
 #include <fstream>
 #include <sstream>

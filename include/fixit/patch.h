@@ -12,6 +12,7 @@
 // landed.  The caller therefore always gets the best available file state plus
 // exact information about what is still missing.
 
+#include <cstddef>
 #include <string>
 #include <vector>
 

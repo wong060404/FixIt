@@ -2,6 +2,7 @@
 //
 // Exit codes: 0 clean/fixed, 1 not fixed, 2 usage error, 3 internal error.
 
+#include <cstddef>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>

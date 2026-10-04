@@ -4,6 +4,7 @@
 // The compiler is the only ground truth in FixIt: nothing else may claim that a
 // repair worked.
 
+#include <cstddef>
 #include <string>
 #include <vector>
 

@@ -13,6 +13,7 @@
 //
 // Usage: fixit-matrix [output.json]
 
+#include <cstddef>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

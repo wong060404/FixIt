@@ -9,6 +9,8 @@
 //
 // Section 3 pins down the units the scoring is built from.
 
+#include <algorithm>
+#include <cstddef>
 #include <sstream>
 #include <string>
 #include <vector>

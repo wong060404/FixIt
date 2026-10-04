@@ -5,6 +5,8 @@
 // non-zero exit that must not read as success) live in the wiring between the
 // library and the executable, not in any single module.
 
+#include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
 #include <filesystem>

@@ -16,6 +16,9 @@
 // Every diff is declared one line below its true position (drift +1).  See
 // docs/decisions.md ADR-003 for the encoding of the insertion case.
 
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <algorithm>
 #include <fstream>
 #include <map>

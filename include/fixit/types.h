@@ -5,6 +5,7 @@
 // that downstream agents can reuse the types without pulling in the parsers.
 
 #include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
 

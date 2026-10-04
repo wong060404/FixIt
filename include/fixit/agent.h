@@ -7,6 +7,7 @@
 // success.
 
 #include <functional>
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <string>

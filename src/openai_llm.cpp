@@ -4,6 +4,7 @@
 // the duration of the call and is never echoed into any output, trace or log:
 // see docs/decisions.md ADR-005.
 
+#include <cstddef>
 #include <iostream>
 #include <string>
 #include <vector>

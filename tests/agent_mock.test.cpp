@@ -7,6 +7,7 @@
 // Everything is offline.  Two runs of the same input must produce byte-identical
 // traces, which is what makes the demo reproducible.
 
+#include <cstddef>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>

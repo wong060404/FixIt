@@ -1,5 +1,8 @@
 #include "fixit/codemap.h"
 
+#include <optional>
+#include <vector>
+#include <cstddef>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
