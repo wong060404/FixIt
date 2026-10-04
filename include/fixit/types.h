@@ -39,7 +39,13 @@ struct CompileResult {
   std::vector<Diagnostic> diagnostics;  // sorted by (file, line, col, message)
   std::string raw_output;
 
+  /// True only when the compiler actually ran and reported no errors.  A
+  /// compiler that could not be executed (exit code 127), one that was killed on
+  /// timeout (-1), or any other non-zero exit with no parsed diagnostics must
+  /// never look like success: the loop treats `clean()` as its ground truth, so
+  /// "no output" has to mean "unknown", not "fine".
   bool clean() const {
+    if (timed_out || exit_code != 0) return false;
     return std::none_of(diagnostics.begin(), diagnostics.end(),
                         [](const Diagnostic& d) { return d.level == DiagLevel::Error; });
   }

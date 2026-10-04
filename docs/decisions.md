@@ -357,3 +357,45 @@ the one nearest the declared position, and a nearer candidate may still be found
 by widening. The whole-file fallback is skipped once a perfect candidate exists,
 so the common case stays cheap. This is the spec's "track the global best plus
 distance tie-break" intent, made explicit.
+
+---
+
+## ADR-017 — "Clean" requires a compiler that actually ran
+
+**Context.** `CompileResult::clean()` was "no error diagnostics".  A compiler that
+could not be executed (`fork`/`exec` failure, exit code `127`) or one killed on
+timeout produces *no diagnostics at all*, so it looked clean.  `clean()` is the
+loop's only ground truth, which made "the toolchain is missing" indistinguishable
+from "the code is fixed" — the worst possible confusion for this tool.
+
+**Decision.** `clean()` is true only when the process exited `0` **and** no
+error-level diagnostic was parsed.  A non-zero exit, a timeout, or a signal all
+report not-clean.  To keep the diagnostics visible anyway, `exit_code`,
+`timed_out` and `raw_output` are always populated, and the `compile` tool returns
+them alongside `clean`.
+
+**Consequences.** The mock model detects "not clean, zero errors" and answers
+`FINAL` with an explanation instead of guessing or looping, so a broken
+environment fails loudly in one round.  `agent_mock.test` covers it, including
+that the source file is left untouched and the trace records `exit_code: 127`.
+
+---
+
+## ADR-018 — The standard tools use the loop's compiler
+
+**Context.** `make_standard_tools(workdir)` built its `compile` tool with a
+default-constructed `Compiler`, i.e. `g++`, regardless of `--compiler`.  The
+agent's own verification used the configured compiler.  With the mock backend the
+mismatch is invisible (the mock never calls `compile`), but any real model that
+re-checks its work through the tool would be told about a different compiler's
+diagnostics than the loop acts on — the model could "fix" something the agent
+still sees as broken, or vice versa.
+
+**Decision.** `make_standard_tools(workdir, compiler)` takes the compiler; the
+single-argument overload remains for convenience and uses the documented
+default.  The CLI and every test pass the same compiler object to both the tools
+and the agent, so the two can never disagree.
+
+**Rationale.** One loop, one compiler.  The bug was found by exercising the tools
+directly (a deliberately non-existent compiler binary proved the override was
+being ignored) rather than by reading the code.

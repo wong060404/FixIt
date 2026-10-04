@@ -157,17 +157,20 @@ nlohmann::json ToolRegistry::call(const std::string& name, const nlohmann::json&
 // Standard tools
 // ---------------------------------------------------------------------------
 ToolRegistry make_standard_tools(std::string workdir) {
+  return make_standard_tools(std::move(workdir), Compiler{});
+}
+
+ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
   ToolRegistry registry;
 
   registry.add("compile", "Compile a C++ source file and return its diagnostics.",
                R"({"type":"object","properties":{"file":{"type":"string"}},"required":["file"]})",
-               [workdir](const nlohmann::json& args) -> nlohmann::json {
+               [workdir, compiler](const nlohmann::json& args) -> nlohmann::json {
                  const std::string file = string_arg(args, "file");
                  std::string resolved;
                  if (!resolve_in_workdir(workdir, file, resolved)) {
                    return nlohmann::json{{"error", "invalid file argument"}};
                  }
-                 const Compiler compiler;
                  const CompileResult result = compiler.compile(resolved);
                  nlohmann::json out = diagnostics_to_json(result);
                  out["file"] = basename_only(file);

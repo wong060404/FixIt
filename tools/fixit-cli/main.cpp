@@ -349,7 +349,10 @@ int main(int argc, char** argv) {
     llm = std::make_unique<fixit::OpenAiLlm>(options.base_url, options.api_key, options.model);
   }
 
-  fixit::Agent agent(fixit::make_standard_tools(workdir), std::move(llm), compiler, workdir);
+  // The tools share the loop's compiler, so a `compile` call from the model and
+  // the agent's own verification can never disagree.
+  fixit::ToolRegistry tools = fixit::make_standard_tools(workdir, compiler);
+  fixit::Agent agent(std::move(tools), std::move(llm), compiler, workdir);
   agent.set_trace_path(options.trace);
 
   Metrics metrics;

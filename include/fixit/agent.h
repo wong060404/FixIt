@@ -169,6 +169,12 @@ class Agent {
 };
 
 /// Builds the three standard tools (compile / read / patch) bound to `workdir`.
+/// The `compile` tool uses `compiler` so that it can never disagree with the
+/// loop's own verification compile -- a mismatch would let the model "fix"
+/// something the agent then still sees as broken.
+ToolRegistry make_standard_tools(std::string workdir, Compiler compiler);
+
+/// Convenience overload using a default-configured compiler (the `g++` default).
 ToolRegistry make_standard_tools(std::string workdir);
 
 }  // namespace fixit

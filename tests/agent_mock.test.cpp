@@ -101,7 +101,7 @@ RunOutcome run_agent(const std::string& example, const fs::path& scratch, int it
   const fs::path file = scratch / example;
   const fs::path trace_path = scratch / "trace.json";
 
-  fixit::Agent agent(fixit::make_standard_tools(scratch.string()),
+  fixit::Agent agent(fixit::make_standard_tools(scratch.string(), make_compiler()),
                      std::make_unique<fixit::MockLlm>(), make_compiler(), scratch.string());
   agent.set_trace_path(trace_path.string());
   outcome.result = agent.run(example, iterations);
@@ -224,7 +224,7 @@ TEST_CASE("a clean file short-circuits the loop", "[agent][integration]") {
   const fs::path file = scratch.path() / "clean.cpp";
   write_file(file, "int main() { return 0; }\n");
 
-  fixit::Agent agent(fixit::make_standard_tools(scratch.path().string()),
+  fixit::Agent agent(fixit::make_standard_tools(scratch.path().string(), make_compiler()),
                      std::make_unique<fixit::MockLlm>(), make_compiler(), scratch.path().string());
   const fixit::AgentResult result = agent.run("clean.cpp", 4);
   CHECK(result.success);
@@ -237,7 +237,7 @@ TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][to
   const fs::path file = scratch.path() / "tool_target.cpp";
   write_file(file, "one\ntwo\nthree\n");
 
-  const fixit::ToolRegistry registry = fixit::make_standard_tools(scratch.path().string());
+  const fixit::ToolRegistry registry = fixit::make_standard_tools(scratch.path().string(), shared_compiler());
   const std::vector<fixit::ToolSpec> specs = registry.specs();
   REQUIRE(specs.size() == 3);
   CHECK(registry.has("compile"));
@@ -273,4 +273,36 @@ TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][to
     CHECK(registry.call("read", nlohmann::json{{"file", "missing.cpp"}}).contains("error"));
     CHECK(registry.call("read", nlohmann::json{{"file", "../escape.cpp"}}).contains("error"));
   }
+}
+
+TEST_CASE("an unusable compiler fails loudly and quickly", "[agent][negative]") {
+  Scratch scratch("broken-compiler");
+  const fs::path file = scratch.path() / "victim.cpp";
+  write_file(file, "int main() { return 0 }\n");
+
+  fixit::CompilerConfig config;
+  config.compiler = "/nonexistent/fixit-no-such-compiler";
+  fixit::Agent agent(fixit::make_standard_tools(scratch.path().string(), fixit::Compiler(config)),
+                     std::make_unique<fixit::MockLlm>(), fixit::Compiler(config),
+                     scratch.path().string());
+  agent.set_trace_path((scratch.path() / "trace.json").string());
+
+  const fixit::AgentResult result = agent.run("victim.cpp", 4);
+
+  // No repair, but also no crash and no busy loop: the mock recognises that the
+  // compiler itself is the problem and stops.
+  CHECK_FALSE(result.success);
+  CHECK(result.iterations <= 2);
+  CHECK(result.patches.empty());
+  // The file is untouched.
+  CHECK(slurp(file) == "int main() { return 0 }\n");
+
+  // The trace is still well formed and explains the situation.
+  const nlohmann::json trace =
+      nlohmann::json::parse(slurp(scratch.path() / "trace.json"), nullptr, false);
+  REQUIRE(trace.is_array());
+  REQUIRE_FALSE(trace.empty());
+  REQUIRE(trace[0].contains("compile_before"));
+  CHECK(trace[0]["compile_before"].value("clean", true) == false);
+  CHECK(trace[0]["compile_before"].value("exit_code", 0) == 127);
 }

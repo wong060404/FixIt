@@ -119,7 +119,7 @@ TEST_CASE("the recorded expected content is what the mock loop produces", "[expe
       fs::copy_file(examples_dir() / (example.name + ".cpp"), work / (example.name + ".cpp"),
                     fs::copy_options::overwrite_existing);
 
-      fixit::Agent agent(fixit::make_standard_tools(work.string()),
+      fixit::Agent agent(fixit::make_standard_tools(work.string(), test_compiler()),
                          std::make_unique<fixit::MockLlm>(), test_compiler(), work.string());
       const fixit::AgentResult result = agent.run(example.name + ".cpp", 4);
 

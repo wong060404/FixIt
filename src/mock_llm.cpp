@@ -52,6 +52,14 @@ struct PendingError {
   std::string message;
 };
 
+/// What the freshest compile observation said, beyond the diagnostics.
+struct CompileState {
+  bool seen = false;
+  bool clean = false;
+  int exit_code = 0;
+  std::size_t error_count = 0;
+};
+
 bool contains(const std::string& haystack, const std::string& needle) {
   return haystack.find(needle) != std::string::npos;
 }
@@ -71,7 +79,8 @@ std::vector<std::string> read_all_lines(const std::string& path) {
 /// ("Task: ... Compile result:\n{...}"), later rounds receive the same shape as
 /// a bare JSON tool observation.  Both are handled here.
 std::vector<PendingError> pending_errors(const std::vector<Message>& messages,
-                                         const std::string& fallback_file) {
+                                         const std::string& fallback_file,
+                                         CompileState* state = nullptr) {
   for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
     if (it->role != "user" && it->role != "tool") continue;
 
@@ -81,8 +90,16 @@ std::vector<PendingError> pending_errors(const std::vector<Message>& messages,
     nlohmann::json payload = nlohmann::json::parse(json_text, nullptr, false);
     if (payload.is_discarded() && it->tool_result.is_object()) payload = it->tool_result;
     if (!payload.is_object() || !payload.contains("errors")) continue;
+
     const nlohmann::json& errors = payload["errors"];
-    if (!errors.is_array() || errors.empty()) continue;
+    if (!errors.is_array()) continue;
+
+    if (state != nullptr) {
+      state->seen = true;
+      state->clean = payload.value("clean", false);
+      state->exit_code = payload.value("exit_code", 0);
+      state->error_count = errors.size();
+    }
 
     std::vector<PendingError> out;
     for (const auto& e : errors) {
@@ -167,7 +184,21 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
     fallback_file.pop_back();
   }
 
-  const std::vector<PendingError> errors = pending_errors(messages, fallback_file);
+  CompileState state;
+  const std::vector<PendingError> errors = pending_errors(messages, fallback_file, &state);
+
+  // The compiler reported a failure but produced no diagnostics: the tool could
+  // not run it at all.  No rule can fix that, and pretending otherwise would
+  // hide a broken environment behind a "nothing to do" answer.
+  if (state.seen && !state.clean && state.error_count == 0) {
+    LlmResponse response;
+    response.is_final = true;
+    response.content =
+        "FINAL: the compiler could not be executed (exit code " + std::to_string(state.exit_code) +
+        "); check the --compiler setting or the toolchain on PATH.";
+    return response;
+  }
+
   if (errors.empty()) return give_up();
 
   // ---- R1: missing include -------------------------------------------------

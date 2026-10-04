@@ -366,3 +366,48 @@ TEST_CASE("real gcc and real clang agree on e1..e3", "[compiler][parity][live]")
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// A compiler that never ran must never look clean.
+//
+// `CompileResult::clean()` is the repair loop's ground truth, so a missing
+// binary or a killed process has to read as "unknown", not "fine".
+// ---------------------------------------------------------------------------
+TEST_CASE("execution failures are never reported as clean", "[compiler][negative]") {
+  SECTION("a missing compiler") {
+    fixit::CompilerConfig config;
+    config.compiler = "/nonexistent/fixit-no-such-compiler";
+    const fixit::Compiler compiler(config);
+    const fixit::CompileResult result = compiler.compile("anything.cpp");
+    CHECK(result.exit_code == 127);
+    CHECK_FALSE(result.clean());
+    CHECK(result.error_count() == 0);  // nothing parsed, and still not "clean"
+    CHECK(result.raw_output.find("cannot execute") != std::string::npos);
+  }
+
+  SECTION("a compiler that cannot parse the flag set still reports its output") {
+    // `/bin/sh` exists, runs, and fails: exit code is non-zero with no
+    // diagnostics.  That must not read as success either.
+    fixit::CompilerConfig config;
+    config.compiler = "/bin/sh";
+    config.extra_flags = {"-c", "exit 3"};
+    const fixit::Compiler compiler(config);
+    const fixit::CompileResult result = compiler.compile("");
+    CHECK(result.exit_code != 0);  // the exact code is the shell's business
+    CHECK_FALSE(result.clean());
+  }
+
+  SECTION("a clean compile is still clean") {
+    std::ofstream out("fixit-clean-probe.cpp");
+    out << "int main() { return 0; }\n";
+    out.close();
+    fixit::CompilerConfig config;
+#ifdef FIXIT_TEST_COMPILER
+    config.compiler = FIXIT_TEST_COMPILER;
+#endif
+    const fixit::CompileResult result = fixit::Compiler(config).compile("fixit-clean-probe.cpp");
+    std::remove("fixit-clean-probe.cpp");
+    CHECK(result.exit_code == 0);
+    CHECK(result.clean());
+  }
+}
