@@ -442,3 +442,38 @@ TEST_CASE("the API key never reaches an artefact", "[agent][security]") {
   const std::string verbose = run_and_capture(std::string(FIXIT_CLI_PATH) + " --help");
   CHECK(verbose.find(planted) == std::string::npos);
 }
+
+TEST_CASE("e3 stays beyond the mock rules on any standard library", "[agent][negative]") {
+  Scratch scratch("e3-rules");
+  scratch.seed("e3_type_error.cpp");
+
+  // The mock gives up on e3 (R4) on this machine.  Whether it keeps giving up on a
+  // different standard library depends on the diagnostics clang/GCC emit for it:
+  //   * a type error (`no matching function`) where the callee is not in the cast
+  //     map is unrepairable by the rules;
+  //   * an undeclared callee whose name is not in the include map is unrepairable.
+  // Pin that reasoning in C++ rather than in a README, so a standard library whose
+  // messages no longer match either shape surfaces here instead of silently
+  // changing the demo.
+  const fixit::Compiler compiler = make_compiler();
+  const fixit::CompileResult compiled =
+      compiler.compile((scratch.path() / "e3_type_error.cpp").string());
+
+  REQUIRE_FALSE(compiled.clean());
+  REQUIRE(compiled.error_count() >= 1);
+
+  const std::string expected_first = "count_words";
+  const std::string expected_second = "count_missing_words";
+  std::size_t matched = 0;
+  for (const fixit::Diagnostic& d : compiled.diagnostics) {
+    if (d.level != fixit::DiagLevel::Error) continue;
+    if (d.message.find(expected_first) != std::string::npos ||
+        d.message.find(expected_second) != std::string::npos) {
+      ++matched;
+    }
+  }
+  // Both symbols must be named by some diagnostic, or the mock's rule set would
+  // need revisiting.
+  CHECK(matched >= 1);
+  CHECK(compiled.diagnostics.front().line >= 1);
+}
