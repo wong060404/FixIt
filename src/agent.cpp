@@ -401,7 +401,15 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
 
       round_entry["tool_calls"].push_back(
           nlohmann::json{{"name", call.name}, {"args", call.args}});
-      observations.push_back(nlohmann::json{{"tool", call.name}, {"result", observation}});
+      nlohmann::json entry = {{"tool", call.name}, {"result", observation}};
+      if (!tools_.has(call.name)) {
+        // A model asked for a tool this build does not offer.  Record that fact
+        // rather than only the error text, so the trace explains the round.
+        entry["unknown_tool"] = true;
+        entry["available_tools"] = nlohmann::json::array();
+        for (const ToolSpec& spec : specs) entry["available_tools"].push_back(spec.name);
+      }
+      observations.push_back(std::move(entry));
       messages.push_back(Message{"tool", observation.dump(2), nlohmann::json::array(), observation});
     }
     round_entry["observations"] = std::move(observations);

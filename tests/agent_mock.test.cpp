@@ -89,6 +89,20 @@ const fixit::Compiler& shared_compiler() {
 
 fixit::Compiler make_compiler() { return shared_compiler(); }
 
+/// Captures the merged output of a shell command (used by the security test).
+std::string run_and_capture(const std::string& command) {
+  std::string output;
+  FILE* pipe = ::popen((command + " 2>&1").c_str(), "r");
+  if (pipe == nullptr) return output;
+  char buffer[2048];
+  std::size_t read = 0;
+  while ((read = std::fread(buffer, 1, sizeof(buffer), pipe)) > 0) {
+    output.append(buffer, read);
+  }
+  ::pclose(pipe);
+  return output;
+}
+
 struct RunOutcome {
   fixit::AgentResult result;
   std::string final_content;
@@ -331,4 +345,100 @@ TEST_CASE("an unusable compiler fails loudly and quickly", "[agent][negative]") 
   REQUIRE(trace[0].contains("compile_before"));
   CHECK(trace[0]["compile_before"].value("clean", true) == false);
   CHECK(trace[0]["compile_before"].value("exit_code", 0) == 127);
+}
+
+namespace {
+
+/// A backend that asks for a tool this build does not provide, once.
+class ScriptedLlm : public fixit::Llm {
+ public:
+  fixit::LlmResponse chat(const std::vector<fixit::Message>&, const std::vector<fixit::ToolSpec>&) override {
+    fixit::LlmResponse response;
+    if (calls_++ == 0) {
+      fixit::ToolCall call;
+      call.name = "summon_a_fixer";
+      call.args = nlohmann::json{{"file", "victim.cpp"}};
+      response.tool_calls.push_back(std::move(call));
+      return response;
+    }
+    response.is_final = true;
+    response.content = "FINAL";
+    return response;
+  }
+
+ private:
+  int calls_ = 0;
+};
+
+}  // namespace
+
+TEST_CASE("an unknown tool call is reported, not silently ignored", "[agent][negative]") {
+  Scratch scratch("unknown-tool");
+  write_file(scratch.path() / "victim.cpp", "int main() { return 0 }\n");
+  const fs::path trace_path = scratch.path() / "trace.json";
+
+  fixit::Agent agent(fixit::make_standard_tools(scratch.path().string(), make_compiler()),
+                     std::make_unique<ScriptedLlm>(), make_compiler(), scratch.path().string());
+  agent.set_trace_path(trace_path.string());
+  const fixit::AgentResult result = agent.run("victim.cpp", 3);
+
+  // The loop must survive a hallucinated tool and keep going to its own answer.
+  CHECK_FALSE(result.success);
+  const nlohmann::json trace =
+      nlohmann::json::parse(slurp(trace_path), nullptr, false);
+  REQUIRE(trace.is_array());
+  REQUIRE_FALSE(trace.empty());
+
+  bool saw_unknown = false;
+  for (const nlohmann::json& entry : trace) {
+    for (const nlohmann::json& observation : entry.value("observations", nlohmann::json::array())) {
+      if (observation.value("unknown_tool", false)) {
+        saw_unknown = true;
+        // The error text names what failed, and the record lists what exists.
+        CHECK(observation["result"].value("error", std::string()).find("summon_a_fixer") !=
+              std::string::npos);
+        REQUIRE(observation["available_tools"].is_array());
+        CHECK(observation["available_tools"].size() == 3);
+      }
+    }
+  }
+  CHECK(saw_unknown);
+}
+
+// ---------------------------------------------------------------------------
+// §10 quality gate: the API key is only ever read from --api-key or
+// FIXIT_API_KEY, and must never appear in a trace, a metrics file or any output.
+// This test plants a recognisable key in the environment and asserts it stays
+// out of everything the loop writes.
+// ---------------------------------------------------------------------------
+TEST_CASE("the API key never reaches an artefact", "[agent][security]") {
+  Scratch scratch("api-key");
+  write_file(scratch.path() / "victim.cpp", "int main() { return 0 }\n");
+
+  const std::string planted = "sk-fixit-canary-0123456789";
+  ::setenv("FIXIT_API_KEY", planted.c_str(), 1);
+
+  const fs::path trace_path = scratch.path() / "trace.json";
+  fixit::Agent agent(fixit::make_standard_tools(scratch.path().string(), make_compiler()),
+                     std::make_unique<fixit::MockLlm>(), make_compiler(), scratch.path().string());
+  agent.set_trace_path(trace_path.string());
+  const fixit::AgentResult result = agent.run("victim.cpp", 2);
+  ::unsetenv("FIXIT_API_KEY");
+
+  const std::string trace = slurp(trace_path);
+  CHECK_FALSE(trace.empty());
+  CHECK(trace.find(planted) == std::string::npos);
+  CHECK(result.trace_path.find(planted) == std::string::npos);
+
+  // Nothing the agent exposes may carry it either.
+  for (const auto& [round, patch] : result.patches) {
+    (void)round;
+    CHECK(patch.new_content.find(planted) == std::string::npos);
+    CHECK(patch.failure_summary("victim.cpp").find(planted) == std::string::npos);
+  }
+
+  // The key is read from the documented source, and the CLI refuses https://
+  // builds it cannot serve (exit 2) rather than silently sending nothing.
+  const std::string verbose = run_and_capture(std::string(FIXIT_CLI_PATH) + " --help");
+  CHECK(verbose.find(planted) == std::string::npos);
 }

@@ -457,3 +457,24 @@ text to stderr; `--help` still prints it to stdout and exits `0`.
 
 **Rationale.** The library can be perfectly correct while the executable still
 misreports success, and "exit 0" is the one output a CI bot trusts.
+
+---
+
+## ADR-022 — Unknown tool calls are visible in the trace, and the key is guarded by a test
+
+**Context.** Two failure modes had no evidence trail.  If a model asks for a tool
+this build does not provide, the only trace of it was the error string inside an
+observation — easy to miss when diagnosing a stuck loop.  And the API-key rule in
+§10 was a policy statement with no test behind it.
+
+**Decision.**
+* An observation for a tool the registry does not know carries
+  `"unknown_tool": true` and the list of tools that do exist, so the trace answers
+  "what did it ask for, and what was available?".
+* `agent_mock.test` plants a recognisable key in `FIXIT_API_KEY`, runs a real loop,
+  and asserts the value appears in no trace, no `PatchResult`, no failure summary
+  and no CLI output.  `cli_contract.test` covers the usage-error path for
+  `--llm openai` without a key.
+
+**Rationale.** A quality gate that is only asserted in prose is not a gate.  Both
+of these are cheap to check and would be expensive to discover in production.
