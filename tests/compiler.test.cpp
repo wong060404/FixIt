@@ -444,9 +444,18 @@ TEST_CASE("real gcc and real clang both diagnose the shipped examples",
       INFO("first anchors: gcc " << gcc_first << " vs clang " << clang_first);
       CHECK(std::abs(gcc_first - clang_first) <= 2);
 
-      const std::string source_path = source.string();
-      const int line_count =
-          1 + static_cast<int>(std::count(source_path.begin(), source_path.end(), '\n'));
+      // Count the lines in the FILE, not in its path: an earlier revision counted
+      // newlines in source.string(), which is always 1, so this assertion compared
+      // against a constant.  The anchors must lie inside the real file.
+      const std::string source_text = [&] {
+        std::ifstream in(source, std::ios::binary);
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        return buffer.str();
+      }();
+      const int line_count = static_cast<int>(std::count(source_text.begin(), source_text.end(), '\n'));
+      INFO("file has " << line_count << " lines");
+      CHECK(line_count > 10);  // the examples are 20+ lines; guards the count itself
       CHECK(gcc_first >= 1);
       CHECK(gcc_first <= line_count);
       CHECK(clang_first >= 1);
