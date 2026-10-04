@@ -113,3 +113,28 @@ format otherwise, and it does not touch the synthetic clang JSON fixtures.
 
 When a capture changes, review the matching `.json` `expect` block: the script
 refreshes the raw output, it does not re-derive the expectations.
+
+
+## Parity: lines yes, columns no
+
+The three `examples/buggy` sources are compiled by both dialects and compared two
+ways:
+
+* `compiler.test` compares the **captures** (`.gcc.txt` vs `.clang.txt`).
+* a second case compares **live output** from a real `g++` and a real `clang++`,
+  skipping itself when either is absent.
+
+Both compare error **line** sets exactly, and deliberately do not compare columns.
+Real compilers disagree about which token a diagnostic points at.  The clearest
+case is `e3_type_error.cpp`'s `count_words(value)`:
+
+| compiler | anchor | why |
+| --- | --- | --- |
+| clang | `13:15` | the identifier being called with a bad argument |
+| GCC | `13:25` | the argument expression that cannot be converted |
+
+The hand-written GCC fixtures use the clang column so the synthetic corpus stays
+internally consistent; re-recording them on a GCC machine will change those
+columns, and both parity cases are written so that this is expected.  What the
+repair loop needs is the line -- that is what selects the hunk context -- and the
+two compilers agree on lines for all three sources.

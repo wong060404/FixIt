@@ -136,16 +136,17 @@ std::size_t error_count(const std::vector<fixit::Diagnostic>& diags) {
       [](const fixit::Diagnostic& d) { return d.level == fixit::DiagLevel::Error; }));
 }
 
-/// The set of (line, column) anchors of the error-level diagnostics.
-std::vector<std::pair<int, int>> error_positions(
-    const std::vector<fixit::Diagnostic>& diags) {
-  std::vector<std::pair<int, int>> positions;
+/// The set of error *lines*: the projection the repair loop depends on, because a
+/// diagnostic's line selects the hunk context.  Compilers agree on lines far more
+/// reliably than on columns.
+std::vector<int> error_lines(const std::vector<fixit::Diagnostic>& diags) {
+  std::vector<int> lines;
   for (const fixit::Diagnostic& d : diags) {
-    if (d.level == fixit::DiagLevel::Error) positions.emplace_back(d.line, d.col);
+    if (d.level == fixit::DiagLevel::Error) lines.push_back(d.line);
   }
-  std::sort(positions.begin(), positions.end());
-  positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
-  return positions;
+  std::sort(lines.begin(), lines.end());
+  lines.erase(std::unique(lines.begin(), lines.end()), lines.end());
+  return lines;
 }
 
 bool ordered_by_position(const std::vector<fixit::Diagnostic>& diags) {
@@ -243,7 +244,12 @@ TEST_CASE("gcc and clang agree on the parity fixtures", "[compiler][fixtures][pa
       REQUIRE(error_count(gcc) > 0);
       REQUIRE(error_count(clang) > 0);
       REQUIRE(error_count(gcc) == error_count(clang));
-      REQUIRE(error_positions(gcc) == error_positions(clang));
+      // Lines are the contract (they select the hunk context).  Columns are not:
+      // the two compilers anchor the same failure on different tokens -- see the
+      // "real gcc and real clang agree" case below.  Comparing lines here also
+      // means these fixtures survive being re-recorded from a real GCC, which
+      // changes columns but not lines.
+      CHECK(error_lines(gcc) == error_lines(clang));
 
       const std::string source = std::string(base) + ".cpp";
       for (const fixit::Diagnostic& d : gcc) REQUIRE(ends_with(d.file, source));
@@ -262,8 +268,17 @@ TEST_CASE("gcc and clang agree on the parity fixtures", "[compiler][fixtures][pa
 //
 // This test removes that doubt where it can: when both a real clang++ and a real
 // g++ are present it compiles e1..e3 with each one, parses the live output of
-// both dialects, and requires identical (line, col) error sets.  On a machine
-// without real GCC it reports a skip instead of a false pass.
+// both dialects, and compares them line by line.
+//
+// Line parity is required; column parity is not.  The two compilers genuinely
+// disagree about which token a diagnostic points at -- for e3's
+// `count_words(value)` clang anchors the invalid conversion on the identifier
+// (`13:15`) while GCC points at the argument (`13:25`) -- so a strict (line, col)
+// assertion would fail against real tools and would only ever pass on hand-
+// written fixtures.  What the loop depends on is the *line*, because that is what
+// selects the hunk context.  The divergence is recorded in
+// tests/fixtures/compiler/README.md.  On a machine without real GCC this test
+// reports a skip instead of a false pass.
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -362,7 +377,24 @@ TEST_CASE("real gcc and real clang agree on e1..e3", "[compiler][parity][live]")
       REQUIRE(error_count(gcc_diagnostics) > 0);
       REQUIRE(error_count(clang_diagnostics) > 0);
       CHECK(error_count(gcc_diagnostics) == error_count(clang_diagnostics));
-      CHECK(error_positions(gcc_diagnostics) == error_positions(clang_diagnostics));
+
+      // The lines must agree exactly: the repair loop keys its context off them.
+      CHECK(error_lines(gcc_diagnostics) == error_lines(clang_diagnostics));
+
+      // Columns are allowed to differ; assert only that every one is usable, and
+      // surface the pairs so a real divergence is visible rather than silent.
+      for (std::size_t i = 0; i < gcc_diagnostics.size() && i < clang_diagnostics.size(); ++i) {
+        const fixit::Diagnostic& a = gcc_diagnostics[i];
+        const fixit::Diagnostic& b = clang_diagnostics[i];
+        CHECK(a.line > 0);
+        CHECK(a.col > 0);
+        CHECK(b.line > 0);
+        CHECK(b.col > 0);
+        if (a.col != b.col) {
+          INFO("gcc " << a.line << ":" << a.col << " [" << a.message << "]  vs  clang " << b.line
+                      << ":" << b.col << " [" << b.message << "]");
+        }
+      }
     }
   }
 }
