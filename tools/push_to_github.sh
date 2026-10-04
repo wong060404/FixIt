@@ -48,7 +48,12 @@ fi
 echo "==> Configuring remote and pushing"
 git remote remove origin 2>/dev/null || true
 git remote add origin "$REMOTE"
-git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f' \
+# A classic token (ghp_...) authenticates with the git username set to the
+# account name.  'x-access-token' is only valid for fine-grained tokens
+# (github_pat_...) and GitHub App installations, and with a classic token it fails
+# with "Invalid username or token" -- verified against the API while pushing this
+# repository.  GITHUB_USER overrides the account when needed.
+git -c credential.helper='!f() { echo "username=${GITHUB_USER:-${ACCOUNT}}"; echo "password=${GITHUB_TOKEN}"; }; f' \
     push -u origin main
 
 echo
