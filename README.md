@@ -243,7 +243,9 @@ fixit <file.cpp> [--agent] [--llm mock|openai] [--model NAME]
 
 Without `--agent` it compiles once and prints the diagnostics. Exit codes:
 `0` clean or repaired, `1` not repaired, `2` usage error (including
-`--llm openai` without a key), `3` internal error. ANSI colour is suppressed when
+`--llm openai` without a key), `3` internal error.  `--no-timing` omits
+wall-clock reports so output can be diffed between runs — that is how
+[`docs/demo_output.txt`](docs/demo_output.txt) stays byte-reproducible. ANSI colour is suppressed when
 stdout is not a TTY or `NO_COLOR` is set, which keeps `docs/demo_output.txt`
 diffable.
 

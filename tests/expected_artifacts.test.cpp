@@ -12,6 +12,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -141,4 +142,29 @@ TEST_CASE("the recorded expected content is what the mock loop produces", "[expe
       fs::remove_all(work, ignored);
     }
   }
+}
+
+TEST_CASE("the committed demo transcript is reproducible evidence", "[expected][artifacts][docs]") {
+  const fs::path transcript = fs::path(FIXIT_SOURCE_DIR) / "docs" / "demo_output.txt";
+  REQUIRE(fs::exists(transcript));
+  const std::string text = slurp(transcript);
+
+  // All three examples must appear, and the two repaired ones must report a
+  // clean loop while e3 is reported as unfixed.
+  CHECK(text.find("e1_missing_include.cpp") != std::string::npos);
+  CHECK(text.find("e2_drift.cpp") != std::string::npos);
+  CHECK(text.find("e3_type_error.cpp") != std::string::npos);
+  CHECK(text.find("✔ Fixed") != std::string::npos);
+  CHECK(text.find("✗ Not fixed") != std::string::npos);
+
+  // --no-timing is what makes this file byte-reproducible: a wall-clock value
+  // such as "(1.2s)" must never be committed here.
+  const std::size_t timing = text.find("s)\n");
+  if (timing != std::string::npos) {
+    const std::size_t open = text.rfind('(', timing);
+    INFO("found what looks like a wall-clock time: " << text.substr(open, 12));
+    CHECK((open == std::string::npos || text[open + 1] < '0' || text[open + 1] > '9'));
+  }
+  // The header explains how the file was produced.
+  CHECK(text.find("--no-timing") != std::string::npos);
 }

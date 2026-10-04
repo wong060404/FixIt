@@ -2,6 +2,7 @@ FixIt v0.1.0 -- recorded demo transcript
 compiler: Apple clang version 17.0.0 (clang-1700.0.13.5)
 platform: Darwin arm64
 NO_COLOR=1 (ANSI colour stripped so this file is diffable)
+--no-timing (wall-clock times omitted so this file is byte-reproducible)
 
 NOTE: e1 and e2 are repaired by the deterministic mock model (exit 0).
       e3 is deliberately beyond the mock's rule set and is reported as
@@ -32,7 +33,7 @@ $ clang++ -fsyntax-only e1_missing_include.cpp
     ✓ hunk 1 @ L11   (fuzzy, drift-1)
 $ clang++ -fsyntax-only e1_missing_include.cpp
   ✓ clean
-✔ Fixed 5 errors in 2 iterations (4.0s)
+✔ Fixed 5 errors in 2 iterations
 
 ========================================================================
 $ fixit e2_drift.cpp --agent --llm mock --verbose --compiler clang++
@@ -59,7 +60,7 @@ $ clang++ -fsyntax-only e2_drift.cpp
     ✓ hunk 1 @ L48   (fuzzy, drift-1)
 $ clang++ -fsyntax-only e2_drift.cpp
   ✓ clean
-✔ Fixed 5 errors in 2 iterations (3.6s)
+✔ Fixed 5 errors in 2 iterations
 
 ========================================================================
 $ fixit e3_type_error.cpp --agent --llm mock --verbose --compiler clang++
@@ -72,7 +73,7 @@ $ clang++ -fsyntax-only e3_type_error.cpp
     [E1]   L13   no matching function for call to 'count_words'
     [E2]   L14   use of undeclared identifier 'count_missing_words'
   → context: fn main() [L11–L16]
-✗ Not fixed after 1 iterations (1.9s)
+✗ Not fixed after 1 iterations
   remaining errors:
     [E1]   L13   no matching function for call to 'count_words'
     [E2]   L14   use of undeclared identifier 'count_missing_words'

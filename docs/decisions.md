@@ -399,3 +399,21 @@ and the agent, so the two can never disagree.
 **Rationale.** One loop, one compiler.  The bug was found by exercising the tools
 directly (a deliberately non-existent compiler binary proved the override was
 being ignored) rather than by reading the code.
+
+---
+
+## ADR-019 — The demo transcript is byte-reproducible
+
+**Context.** §10 requires the demo evidence to be committed, but the summary line
+prints wall-clock time, so `docs/demo_output.txt` changed on every regeneration
+and a reader could not tell a real behavioural change from a slow machine.
+
+**Decision.** `--no-timing` omits the elapsed time, and `tools/record_demo.sh`
+uses it.  The transcript is now byte-identical across runs (verified by hashing
+it twice), so it can be committed as evidence that never drifts.  Wall-clock time
+remains available by default and is still the *only* intentionally
+non-deterministic field in `--metrics`.
+
+**Rationale.** Determinism is a stated quality gate; an artefact that churns on
+every run is not evidence.  `expected_artifacts.test` checks that the committed
+file has no timing values and mentions all three examples.

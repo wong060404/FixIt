@@ -65,6 +65,7 @@ struct Options {
   std::string metrics;
   std::string compiler = "g++";
   bool no_write = false;  ///< repair a scratch copy and leave the tree untouched
+  bool show_timing = true;  ///< --no-timing keeps the transcript byte-reproducible
 };
 
 void usage() {
@@ -83,6 +84,8 @@ void usage() {
   --compiler NAME         compiler binary (default: g++)
   --no-write              repair a scratch copy; the source file is left as is
                           (useful for repeatable demos and CI smoke tests)
+  --no-timing             omit wall-clock times, making the output byte-identical
+                          across runs (used by tools/record_demo.sh)
   -h, --help              this message
 
 Exit codes: 0 clean or fixed, 1 not fixed, 2 usage error, 3 internal error.
@@ -113,6 +116,8 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
       options.agent = true;
     } else if (arg == "--no-write") {
       options.no_write = true;
+    } else if (arg == "--no-timing") {
+      options.show_timing = false;
     } else if (arg == "--verbose") {
       options.verbose = true;
     } else if (arg == "--llm") {
@@ -455,16 +460,17 @@ int main(int argc, char** argv) {
     write_metrics(options.metrics, metrics, result.success, result.iterations, elapsed());
   }
 
-  const std::string seconds = fixed1(elapsed());
+  const std::string suffix =
+      options.show_timing ? " (" + fixed1(elapsed()) + "s)" : std::string();
   if (result.success) {
     std::cout << green("✔ Fixed " + std::to_string(result.errors_fixed) + " errors in " +
-                       std::to_string(result.iterations) + " iterations (" + seconds + "s)")
+                       std::to_string(result.iterations) + " iterations" + suffix)
               << "\n";
     return 0;
   }
 
-  std::cout << red("✗ Not fixed after " + std::to_string(result.iterations) + " iterations (" +
-                   seconds + "s)") << "\n";
+  std::cout << red("✗ Not fixed after " + std::to_string(result.iterations) + " iterations" +
+                   suffix) << "\n";
   if (!result.final_errors.empty()) {
     std::cout << "  remaining errors:\n";
     print_error_list(result.final_errors, "    ");

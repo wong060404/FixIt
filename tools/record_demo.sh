@@ -26,6 +26,7 @@ mkdir -p "$(dirname "${OUT}")"
   echo "compiler: $("${COMPILER}" --version | head -1)"
   echo "platform: $(uname -s) $(uname -m)"
   echo "NO_COLOR=1 (ANSI colour stripped so this file is diffable)"
+  echo "--no-timing (wall-clock times omitted so this file is byte-reproducible)"
   echo
   echo "NOTE: e1 and e2 are repaired by the deterministic mock model (exit 0)."
   echo "      e3 is deliberately beyond the mock's rule set and is reported as"
@@ -36,8 +37,10 @@ mkdir -p "$(dirname "${OUT}")"
     echo "========================================================================"
     echo "\$ fixit ${example}.cpp --agent --llm mock --verbose --compiler ${COMPILER}"
     echo "========================================================================"
+    # --no-timing keeps this transcript byte-identical from run to run, so it can
+    # be committed as evidence that never drifts.
     ( cd "${WORK}" && NO_COLOR=1 "${BIN}" "${example}.cpp" --agent --llm mock --verbose \
-        --compiler "${COMPILER}" --trace "${WORK}/${example}.trace.json" ) || true
+        --no-timing --compiler "${COMPILER}" --trace "${WORK}/${example}.trace.json" ) || true
     echo
   done
 
