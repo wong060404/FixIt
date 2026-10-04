@@ -64,11 +64,22 @@ That command repairs the example in place. Add `--no-write` to repair a scratch
 copy instead and leave the working tree byte-identical — which is what the CI
 smoke test and the recorded demo use, so both can be re-run at any time.
 
-Requirements: CMake ≥ 3.20, a C++20 compiler (gcc 12 / clang 15 or newer), and
-Python ≥ 3.8 only if you want to regenerate the golden patches
-(`tools/gen_golden_cases.py`). Dependencies come from the vendored snapshot in
-`third_party/`; a plain checkout that lacks it falls back to `FetchContent`
-against the pinned upstream tags.
+### Requirements
+
+* **CMake ≥ 3.20, installed and on `PATH`.** The build cannot bootstrap its own
+  build system: if `cmake` is missing, install it first (for example
+  `brew install cmake`, or `pip install cmake` and put its `bin/` directory on
+  `PATH` — a pip-installed CMake works, but only once it is findable as `cmake`).
+* A C++20 compiler: gcc 12 / clang 15 or newer. On macOS `clang++` is fine; note
+  that an Apple clang build has no JSON diagnostics, which FixIt detects and
+  falls back from automatically (ADR-007).
+* Python ≥ 3.8 only for the maintenance scripts that regenerate artefacts
+  (`tools/gen_golden_cases.py`, `tools/render_heatmap.py`, `tools/gen_expected.sh`).
+  The test suite itself never shells out to Python.
+
+Dependencies come from the vendored snapshot in `third_party/`; a checkout that
+lacks it (for example a tarball of just the sources) falls back to `FetchContent`
+against the pinned upstream tags, which needs network access at configure time.
 
 ## 4. Demo Transcript
 
