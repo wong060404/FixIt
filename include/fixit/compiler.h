@@ -72,4 +72,10 @@ class Compiler {
 /// `uses_json` selects the clang JSON dialect, otherwise the GCC text dialect.
 std::vector<Diagnostic> parse_diagnostics(const std::string& raw_output, bool uses_json);
 
+/// Normalises the typographic quotes GCC 12 uses around identifiers and tokens
+/// (`‘vector’`, `‘;’`) to the straight quotes clang uses (`'vector'`, `';'`).
+/// Everything downstream -- the mock's repair rules, diffs, prompts -- can then
+/// match one spelling.  Any other character is left untouched.
+std::string normalize_quotes(const std::string& text);
+
 }  // namespace fixit

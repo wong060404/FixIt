@@ -25,6 +25,35 @@
 #include <nlohmann/json.hpp>
 
 namespace fixit {
+
+namespace {
+/// GCC 12 prints `‘x’` (U+2018/U+2019) where clang prints `'x'`.
+const char* kLeftSingleQuote = "\xe2\x80\x98";
+const char* kRightSingleQuote = "\xe2\x80\x99";
+const char* kLeftDoubleQuote = "\xe2\x80\x9c";
+const char* kRightDoubleQuote = "\xe2\x80\x9d";
+
+}  // namespace
+
+std::string normalize_quotes(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (std::size_t i = 0; i < text.size();) {
+    const bool left = text.compare(i, 3, kLeftSingleQuote) == 0 ||
+                      text.compare(i, 3, kLeftDoubleQuote) == 0;
+    const bool right = text.compare(i, 3, kRightSingleQuote) == 0 ||
+                       text.compare(i, 3, kRightDoubleQuote) == 0;
+    if (left || right) {
+      out += '\'';
+      i += 3;
+      continue;
+    }
+    out += text[i];
+    ++i;
+  }
+  return out;
+}
+
 namespace {
 
 constexpr std::size_t kMaxDiagnostics = 50;
@@ -113,7 +142,7 @@ std::vector<Diagnostic> parse_gcc(const std::string& raw_output) {
     d.line = std::stoi(m[2].str());
     d.col = std::stoi(m[3].str());
     d.level = (kind == "warning") ? DiagLevel::Warning : DiagLevel::Error;
-    d.message = m[5].str();
+    d.message = normalize_quotes(m[5].str());
 
     // Look ahead 1-3 lines for the caret block that belongs to this message.
     for (std::size_t j = i + 1; j < lines.size() && j <= i + 3; ++j) {

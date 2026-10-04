@@ -219,11 +219,15 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
   };
 
   const auto needs_include = [](const std::string& message) {
-    // "was not declared" / "not declared in this scope" (GCC + clang) and
-    // clang's "no member named 'X' in namespace 'std'" are the same failure
-    // mode for this repair rule.
+    // The same failure mode, as each compiler words it:
+    //   clang: "no member named 'vector' in namespace 'std'"
+    //          "use of undeclared identifier 'x'"
+    //   GCC  : "'vector' in namespace 'std' does not name a template type"
+    //          "'x' was not declared in this scope"
+    // Quotes are already normalised to ASCII by parse_diagnostics(), so one
+    // spelling suffices here.
     return contains(message, "was not declared") || contains(message, "not declared in this scope") ||
-           contains(message, "no member named");
+           contains(message, "no member named") || contains(message, "does not name a");
   };
 
   // Only real `#include` directives count -- a usage such as
@@ -284,7 +288,12 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
   // on separate rounds, as the demo transcript shows.
   if (per_file.empty()) {
     for (const PendingError& error : errors) {
-      if (!contains(error.message, "expected ';'")) continue;
+      // clang: "expected ';' at end of declaration"
+      // GCC  : "expected ',' or ';' before 'return'"
+      const bool wants_semicolon = contains(error.message, "expected ';'") ||
+                                   (contains(error.message, "expected '") &&
+                                    contains(error.message, "';'"));
+      if (!wants_semicolon) continue;
       if (error.line <= 0) continue;
 
       const std::vector<std::string> lines = read_all_lines(resolve(error.file));

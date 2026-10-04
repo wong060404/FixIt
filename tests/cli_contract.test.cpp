@@ -146,7 +146,11 @@ TEST_CASE("compile mode reports clean and broken files", "[cli]") {
     const Run run = run_cli({bad.string()});
     CHECK(run.exit_code == 1);
     CHECK(run.output.find("[E1]") != std::string::npos);
-    CHECK(run.output.find("expected ';'") != std::string::npos);
+    // The wording is compiler-specific -- clang says "expected ';' at end of
+    // declaration", GCC "expected ',' or ';' before 'return'" -- so match the
+    // shared part rather than one compiler's phrasing.
+    CHECK(run.output.find("expected") != std::string::npos);
+    CHECK(run.output.find("';'") != std::string::npos);
   }
 }
 
