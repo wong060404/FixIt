@@ -29,13 +29,20 @@ struct CompilerConfig {
 struct DiagnosticFlags {
   bool uses_json = false;             ///< parse with the JSON dialect
   std::string json_flag;              ///< flag actually passed, empty when none
+  /// Whether this compiler accepts `-ferror-limit=N`.  clang does; GCC does not,
+  /// and passing it makes GCC abort with "unrecognized command-line option"
+  /// before compiling anything, which yields zero diagnostics and looks exactly
+  /// like a clean build.  Probed, never assumed.
+  bool supports_error_limit = true;
   std::vector<std::string> extra_flags;  ///< probe-derived flags to append
 };
 
-/// Chooses the diagnostic dialect for `compiler`.  A compiler that rejects
-/// `-fjson-diagnostics` is probed for `-fdiagnostics-format=json`; if that also
-/// fails we fall back to the plain text parser, so an unexpected clang build
-/// degrades instead of losing every diagnostic.
+/// Chooses the diagnostic dialect *and* the optional flags for `compiler` by
+/// asking it, once.  A compiler that rejects `-fjson-diagnostics` is probed for
+/// `-fdiagnostics-format=json`; if that also fails we fall back to the text
+/// parser.  `-ferror-limit` is included only when the compiler accepts it, so
+/// GCC (which has no such flag) is driven correctly instead of failing early.
+/// Everything degrades to a working state rather than a silent one.
 DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_seconds = 10);
 
 class Compiler {

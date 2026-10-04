@@ -504,3 +504,42 @@ the repair loop works from.  Asserting more than the tools guarantee would make 
 fail for a reason that is not a defect in FixIt, and relaxing it silently would
 hide real parser regressions -- hence the explicit `INFO` and the per-fixture
 column assertions.
+
+---
+
+## ADR-024 — `-ferror-limit` is probed, because GCC does not have it
+
+**Context.** §3.1 specifies the fixed flag set
+`-std=c++20 -fsyntax-only -ferror-limit=<N>`.  That is true of clang and false of
+GCC: `g++-12` answers
+
+```
+g++-12: error: unrecognized command-line option '-ferror-limit=5'
+```
+
+and exits before compiling anything.  The result is *zero diagnostics*, which is
+indistinguishable from a clean build — so on the ubuntu/gcc-12 CI job every
+compile looked successful while nothing had been compiled.  The whole suite was
+green on macOS because `/usr/bin/g++` there is clang.
+
+**Decision.** Capability probing is extended from the diagnostic dialect to the
+optional flags.  `-ferror-limit=N` is passed only when the compiler accepts it;
+otherwise it is omitted (the 50-diagnostic internal cap still applies).  This
+required removing an early `return` that skipped probing entirely for any
+compiler whose name did not look like clang — the reason the flag was passed to
+GCC even after the first fix attempt.  The probe itself had to change from "exited
+0 and emitted parseable JSON" to "did the compiler *reject* this flag?", because
+`-ferror-limit` is accepted silently and emits nothing.
+
+**Consequence (accepted deviation).** With GCC, `error_limit` cannot be honoured:
+GCC offers no equivalent flag, so it reports every error rather than the first N.
+FixIt's own cap of 50 parsed diagnostics still applies.  This is recorded here
+rather than emulated, because inventing a limit by truncating output would hide
+diagnostics the compiler considered relevant.
+
+**How it was found and verified.** The CI job's log gave the exact refusal; a
+GCC-behaviour simulator (rejecting the flag while emitting GCC-format
+diagnostics) then reproduced it locally.  Against that simulator the three
+examples behave exactly as required: e1 and e2 exit 0, e3 exits 1, and the
+repaired e1 compiles.  Keeping the CI job — rather than trusting the local
+toolchain — is what surfaced this; the first green run on Linux is the proof.

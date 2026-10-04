@@ -395,7 +395,7 @@ class TempFile {
 
 DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_seconds) {
   DiagnosticFlags flags;
-  if (!looks_like_clang(compiler)) return flags;  // GCC dialect, no JSON flag
+  const bool clang_like = looks_like_clang(compiler);
 
   // Probing spawns the compiler twice, and a repair loop constructs a few
   // Compiler objects.  Cache per (compiler, binary mtime) so the cost is paid
@@ -424,28 +424,53 @@ DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_
   static const char kEmpty[] = "// fixit diagnostic-format probe\n";
   const TempFile probe(kEmpty);
 
-  const auto accepts = [&](const std::string& json_flag) {
-    std::vector<std::string> argv{compiler, "-std=c++20", "-fsyntax-only", json_flag};
+  // Does the compiler *reject* this flag?  Testing for rejection rather than for
+  // "clean exit with parseable output" matters: `-ferror-limit=5` is accepted
+  // silently (no output at all) while `-fjson-diagnostics` is accepted and
+  // produces JSON, so one predicate cannot be "exit 0 and output parses".
+  const auto rejects = [&](const std::string& flag) {
+    std::vector<std::string> argv{compiler, "-std=c++20", "-fsyntax-only", flag};
     if (!probe.path().empty()) argv.push_back(probe.path());
     const CapturedProcess proc = run_capture(argv, timeout_seconds);
-    if (proc.timed_out || proc.exit_code != 0) return false;
+    if (proc.timed_out) return true;  // treat a hang as "not usable"
+    const std::string out = proc.output;
+    for (const char* marker : {"unrecognized", "unknown argument", "invalid value",
+                               "not supported", "unsupported option"}) {
+      if (out.find(marker) != std::string::npos) return true;
+    }
+    // Any other failure is a real compilation problem, not a rejected flag.
+    return proc.exit_code != 0;
+  };
+
+  // A JSON dialect flag must be accepted *and* actually produce JSON.
+  const auto accepts_json = [&](const std::string& flag) {
+    if (rejects(flag)) return false;
+    std::vector<std::string> argv{compiler, "-std=c++20", "-fsyntax-only", flag};
+    if (!probe.path().empty()) argv.push_back(probe.path());
+    const CapturedProcess proc = run_capture(argv, timeout_seconds);
     const std::string out = trim_left(proc.output);
     if (out.empty()) return false;
-    // The compiler must actually speak JSON, not merely tolerate the flag.
-    nlohmann::json j = nlohmann::json::parse(out, nullptr, false);
+    const nlohmann::json j = nlohmann::json::parse(out, nullptr, false);
     return !j.is_discarded();
   };
 
-  if (accepts("-fjson-diagnostics")) {
-    flags.uses_json = true;
-    flags.json_flag = "-fjson-diagnostics";
-  } else if (accepts("-fdiagnostics-format=json")) {
-    flags.uses_json = true;
-    flags.json_flag = "-fdiagnostics-format=json";
-  } else {
-    // Clang that supports neither flag: the text fallback keeps diagnostics usable.
-    flags.uses_json = false;
+  if (clang_like) {
+    if (accepts_json("-fjson-diagnostics")) {
+      flags.uses_json = true;
+      flags.json_flag = "-fjson-diagnostics";
+    } else if (accepts_json("-fdiagnostics-format=json")) {
+      flags.uses_json = true;
+      flags.json_flag = "-fdiagnostics-format=json";
+    } else {
+      // Clang that supports neither flag: the text fallback keeps diagnostics usable.
+      flags.uses_json = false;
+    }
   }
+
+  // Independent of the dialect: does this compiler know `-ferror-limit`?  GCC does
+  // not, and passing it makes GCC exit before compiling anything -- zero
+  // diagnostics, which the loop would otherwise read as a clean build.
+  flags.supports_error_limit = !rejects("-ferror-limit=5");
 
   {
     std::lock_guard<std::mutex> lock(cache_mutex);
@@ -476,7 +501,9 @@ std::vector<std::string> Compiler::command_line(const std::string& source_file) 
   argv.push_back(cfg_.compiler);
   argv.push_back("-std=c++20");
   argv.push_back("-fsyntax-only");
-  argv.push_back("-ferror-limit=" + std::to_string(cfg_.error_limit));
+  if (resolved_.supports_error_limit) {
+    argv.push_back("-ferror-limit=" + std::to_string(cfg_.error_limit));
+  }
   if (!resolved_.json_flag.empty()) argv.push_back(resolved_.json_flag);
   for (const std::string& flag : cfg_.extra_flags) argv.push_back(flag);
   argv.push_back(source_file);
