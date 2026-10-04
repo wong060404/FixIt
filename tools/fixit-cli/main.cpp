@@ -66,6 +66,7 @@ struct Options {
   std::string compiler = "g++";
   bool no_write = false;  ///< repair a scratch copy and leave the tree untouched
   bool show_timing = true;  ///< --no-timing keeps the transcript byte-reproducible
+  bool outline = false;     ///< print the CodeMap view of the file and stop
 };
 
 void usage() {
@@ -86,6 +87,8 @@ void usage() {
                           (useful for repeatable demos and CI smoke tests)
   --no-timing             omit wall-clock times, making the output byte-identical
                           across runs (used by tools/record_demo.sh)
+  --outline               print the structural map (functions, includes, syntax
+                          errors) instead of compiling
   -h, --help              this message
 
 Exit codes: 0 clean or fixed, 1 not fixed, 2 usage error, 3 internal error.
@@ -118,6 +121,8 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
       options.no_write = true;
     } else if (arg == "--no-timing") {
       options.show_timing = false;
+    } else if (arg == "--outline") {
+      options.outline = true;
     } else if (arg == "--verbose") {
       options.verbose = true;
     } else if (arg == "--llm") {
@@ -321,6 +326,37 @@ int main(int argc, char** argv) {
   const auto elapsed = [&] {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
   };
+
+  // ---- outline mode --------------------------------------------------------
+  if (options.outline) {
+    const fixit::CodeMap map(options.file);
+    std::cout << "══ FixIt v" << kVersion << " · outline mode ══\n\n";
+    std::cout << display_file << ": " << map.line_count() << " lines, "
+              << map.functions().size() << " functions\n";
+    if (map.has_syntax_errors()) {
+      std::cout << "  " << red("✗ the AST contains syntax errors");
+      const std::vector<int> lines = map.syntax_error_lines();
+      if (!lines.empty()) {
+        std::cout << " on line";
+        if (lines.size() > 1) std::cout << "s";
+        for (std::size_t i = 0; i < lines.size() && i < 10; ++i) {
+          std::cout << (i == 0 ? " " : ", ") << lines[i];
+        }
+      }
+      std::cout << "\n";
+    } else {
+      std::cout << "  " << green("✓ no syntax errors") << "\n";
+    }
+    std::cout << "\n  includes\n";
+    for (const std::string& include : map.includes()) {
+      std::cout << "    " << include << "\n";
+    }
+    std::cout << "\n  functions\n";
+    for (const fixit::FunctionInfo& fn : map.functions()) {
+      std::printf("    L%-4d - L%-4d  %s\n", fn.start_line, fn.end_line, fn.name.c_str());
+    }
+    return 0;
+  }
 
   // ---- compile-only mode ---------------------------------------------------
   if (!options.agent) {

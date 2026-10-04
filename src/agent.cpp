@@ -177,8 +177,8 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  return out;
                });
 
-  registry.add("read", "Read a line range of a file; lines are numbered for quoting.",
-               R"({"type":"object","properties":{"file":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"}},"required":["file","start","end"]})",
+  registry.add("read", "Read a line range of a file; lines are numbered for quoting. Also returns a structural outline (functions with line ranges, includes, syntax-error lines).",
+               R"({"type":"object","properties":{"file":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"},"outline":{"type":"boolean"}},"required":["file","start","end"]})",
                [workdir](const nlohmann::json& args) -> nlohmann::json {
                  const std::string file = string_arg(args, "file");
                  std::string resolved;
@@ -207,7 +207,34 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                    formatted << number;
                    out << formatted.str() << " | " << line << "\n";
                  }
-                 return nlohmann::json{{"content", out.str()}, {"start", start}, {"end", end}};
+
+                 nlohmann::json result{{"content", out.str()}, {"start", start}, {"end", end}};
+
+                 // A structural outline of the file (CodeMap): the functions with
+                 // their line ranges, the includes, and whether the AST admits a
+                 // syntax error.  A model uses it to aim its patches, and it is
+                 // returned by default because it is small and almost always
+                 // useful.
+                 const bool want_outline = args.is_object() && args.contains("outline")
+                                               ? args["outline"].get<bool>()
+                                               : true;
+                 if (want_outline) {
+                   const CodeMap map(resolved);
+                   nlohmann::json functions = nlohmann::json::array();
+                   for (const FunctionInfo& fn : map.functions()) {
+                     functions.push_back(nlohmann::json{{"name", fn.name},
+                                                        {"start_line", fn.start_line},
+                                                        {"end_line", fn.end_line},
+                                                        {"signature", fn.signature}});
+                   }
+                   std::vector<int> error_lines = map.syntax_error_lines();
+                   nlohmann::json syntax_errors = nlohmann::json::array();
+                   for (int error_line : error_lines) syntax_errors.push_back(error_line);
+                   result["outline"] = nlohmann::json{{"functions", std::move(functions)},
+                                                      {"includes", map.includes()},
+                                                      {"syntax_error_lines", std::move(syntax_errors)}};
+                 }
+                 return result;
                });
 
   registry.add("patch", "Apply a unified diff to a file with the fuzzy patch engine.",

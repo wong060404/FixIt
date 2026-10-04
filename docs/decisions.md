@@ -417,3 +417,24 @@ non-deterministic field in `--metrics`.
 **Rationale.** Determinism is a stated quality gate; an artefact that churns on
 every run is not evidence.  `expected_artifacts.test` checks that the committed
 file has no timing values and mentions all three examples.
+
+---
+
+## ADR-020 — CodeMap is reachable from the agent and the CLI
+
+**Context.** `CodeMap` was a library class used only by the CLI's verbose context
+line and by its own tests.  A model in the loop had no way to ask "what does this
+file look like?" — it could only read numbered lines and guess at structure.
+
+**Decision.** Two additive integrations, neither of which changes the documented
+shapes:
+
+* the `read` tool keeps its contract (`{content}` with numbered lines) and adds an
+  optional `outline` (default on) carrying functions with their line ranges,
+  includes, and syntax-error lines.  `outline: false` returns the minimal answer.
+* `fixit <file> --outline` prints the same map for a human and exits.
+
+**Rationale.** The brief defines the three tools, so no fourth tool is added; the
+structure rides along with the read the model already does.  This also gives
+`--outline` a natural CI use: it fails visibly on a syntax-broken tree without
+running a compiler.

@@ -235,7 +235,15 @@ TEST_CASE("a clean file short-circuits the loop", "[agent][integration]") {
 TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][tools]") {
   Scratch scratch("tools");
   const fs::path file = scratch.path() / "tool_target.cpp";
-  write_file(file, "one\ntwo\nthree\n");
+  write_file(file,
+             "#include <cstdio>\n"
+             "int alpha(int value) {\n"
+             "  return value + 1;\n"
+             "}\n"
+             "\n"
+             "int beta(int value) {\n"
+             "  return alpha(value);\n"
+             "}\n");
 
   const fixit::ToolRegistry registry = fixit::make_standard_tools(scratch.path().string(), shared_compiler());
   const std::vector<fixit::ToolSpec> specs = registry.specs();
@@ -249,11 +257,29 @@ TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][to
     CHECK_FALSE(schema.is_discarded());
   }
 
-  SECTION("read returns numbered lines") {
+  SECTION("read returns numbered lines plus a structural outline") {
     const nlohmann::json result =
         registry.call("read", nlohmann::json{{"file", "tool_target.cpp"}, {"start", 2}, {"end", 3}});
     REQUIRE(result.contains("content"));
-    CHECK(result["content"].get<std::string>() == "   2 | two\n   3 | three\n");
+    CHECK(result["content"].get<std::string>() ==
+          "   2 | int alpha(int value) {\n   3 |   return value + 1;\n   4 | }\n");
+
+    // The outline comes from CodeMap: functions with their ranges and includes.
+    REQUIRE(result.contains("outline"));
+    CHECK(result["outline"].contains("functions"));
+    CHECK(result["outline"].contains("includes"));
+    REQUIRE(result["outline"]["functions"].is_array());
+    REQUIRE_FALSE(result["outline"]["functions"].empty());
+    const nlohmann::json& fn = result["outline"]["functions"][0];
+    CHECK(fn.value("name", std::string()) == "alpha");
+    CHECK(fn.value("start_line", 0) == 2);
+    CHECK(fn.value("end_line", 0) == 4);
+    CHECK(result["outline"].value("syntax_error_lines", nlohmann::json::array()).empty());
+
+    // ... and can be switched off for a minimal answer.
+    const nlohmann::json terse = registry.call(
+        "read", nlohmann::json{{"file", "tool_target.cpp"}, {"start", 1}, {"end", 1}, {"outline", false}});
+    CHECK_FALSE(terse.contains("outline"));
   }
 
   SECTION("patch writes the file and reports the hunks") {
@@ -261,9 +287,9 @@ TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][to
         "patch",
         nlohmann::json{{"file", "tool_target.cpp"},
                        {"diff", "--- a/tool_target.cpp\n+++ b/tool_target.cpp\n"
-                                "@@ -2,1 +2,1 @@\n-two\n+TWO\n"}});
+                                "@@ -3,1 +3,1 @@\n-  return value + 1;\n+  return value + 2;\n"}});
     CHECK(result.value("all_applied", false));
-    CHECK(slurp(file) == "one\nTWO\nthree\n");
+    CHECK(slurp(file).find("return value + 2;") != std::string::npos);
     REQUIRE(result.contains("reports"));
     CHECK(result["reports"][0].value("status", std::string()) == "applied");
   }
