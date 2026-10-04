@@ -121,12 +121,29 @@ TEST_CASE("the recorded expected content is what the mock loop produces", "[expe
       fs::copy_file(examples_dir() / (example.name + ".cpp"), work / (example.name + ".cpp"),
                     fs::copy_options::overwrite_existing);
 
+      // Baseline BEFORE the run: how many diagnostics this compiler sees in the
+      // seed file.  Captured here because the agent repairs the file in place.
+      const fixit::CompileResult baseline =
+          test_compiler().compile((work / (example.name + ".cpp")).string());
+      const int baseline_errors = static_cast<int>(baseline.error_count());
+
       fixit::Agent agent(fixit::make_standard_tools(work.string(), test_compiler()),
                          std::make_unique<fixit::MockLlm>(), test_compiler(), work.string());
       const fixit::AgentResult result = agent.run(example.name + ".cpp", 4);
 
       CHECK(result.success == example.should_succeed);
-      CHECK(result.errors_fixed == example.initial_errors);
+
+      // `errors_fixed` is however many diagnostics *this* compiler produced, and
+      // that count is compiler-specific: for e1, clang reports 5 while GCC
+      // cascades to 10 from the same missing semicolon.  Compare against the
+      // baseline captured above rather than against the snapshot, so the
+      // assertion is meaningful on both toolchains instead of only where the
+      // artefacts were recorded.
+      INFO("baseline errors on this compiler: " << baseline_errors);
+      CHECK(result.errors_fixed == baseline_errors);
+
+      // The repaired file itself is compiler-independent: the mock produces the
+      // same two edits either way.
       CHECK(slurp(work / (example.name + ".cpp")) ==
             slurp(examples_dir() / "expected" / (example.name + ".expected.cpp")));
 

@@ -176,6 +176,10 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  const CompileResult result = compiler.compile(resolved);
                  nlohmann::json out = diagnostics_to_json(result);
                  out["file"] = basename_only(file);
+                 // The compiler's own words.  When a toolchain fails before it
+                 // diagnoses anything (a rejected flag, a missing binary) this is
+                 // the only evidence of why, and it costs one string.
+                 if (!result.raw_output.empty()) out["raw_output"] = result.raw_output;
                  return out;
                });
 

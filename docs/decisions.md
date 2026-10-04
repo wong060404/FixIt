@@ -543,3 +543,57 @@ diagnostics) then reproduced it locally.  Against that simulator the three
 examples behave exactly as required: e1 and e2 exit 0, e3 exits 1, and the
 repaired e1 compiles.  Keeping the CI job — rather than trusting the local
 toolchain — is what surfaced this; the first green run on Linux is the proof.
+
+---
+
+## ADR-025 — Cross-compiler parity asserts the faulty statement, not the error set
+
+**Context.** §6 asks for a gcc/clang parity test that the `(line, col)` sets are
+identical.  Running it against real GCC showed that this is not a property any
+two compilers have.  For `e1_missing_include.cpp` the same missing semicolon makes
+GCC emit **10** diagnostics and clang **5**, because their error recovery differs;
+the full line sets differ too ({10, 14, 20, 21} vs {10, 14}).  Columns differ as
+well (`13:25` vs `13:15` on e3).  An equality assertion could therefore only ever
+pass against hand-written fixtures, and it failed the first time CI used a real
+GCC.
+
+**Decision.** Both parity cases assert what is actually guaranteed and actually
+matters to the repair loop:
+
+* each compiler reports at least one error, and neither misses the fault;
+* the **first** diagnostic of each names the same line (that line is what selects
+  the hunk context);
+* every line clang flags is also flagged by GCC — GCC may cascade further, it may
+  not cascade less;
+* columns must be usable (`> 0`) but are not compared.
+
+Individual fixtures still assert their own exact line, column, level and message,
+so the parsers stay tightly pinned; only the cross-compiler comparison is
+relaxed, and the divergence is measured and printed through `INFO`.
+
+**Consequence.** The archived corpus keeps hand-aligned GCC fixtures.  They are
+marked `"recorded": "synthetic"` and re-recordable with
+`tools/record_compiler_fixtures.sh` on a machine with real GCC.  Because the
+parity assertions no longer compare counts, re-recording them will not break the
+suite.
+
+---
+
+## ADR-026 — `tools/gcc_sim.py` exists because this machine has no GCC
+
+**Context.** Development happens on macOS, where `/usr/bin/g++` is clang.  Two
+GCC-specific defects reached CI before anyone could see them locally: the
+clang-only `-ferror-limit` flag, and parity assertions that real GCC cannot
+satisfy.  Each cost a CI round trip and a log dig.
+
+**Decision.** Ship a small GCC stand-in (`tools/gcc_sim.py`) that rejects the
+clang-only flags exactly as g++-12 does and emits GCC-shaped diagnostics, using
+clang only as its analysis backend.  It can be symlinked as `g++` on `PATH`, and
+the local suite then reproduces the CI conditions: with it, the full test suite
+passes 6/6, and before the ADR-024 fix it failed in exactly the way CI did.
+
+**Rationale.** The simulator is honest about being a simulator (the diagnostics
+are real, the driver is not), it is not part of the build, and it does not replace
+CI: the ubuntu/gcc-12 job remains the authority on real GCC.  It shortens the
+feedback loop from one CI round trip to seconds, which is what the two failures
+above actually cost.

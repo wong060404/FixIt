@@ -356,13 +356,9 @@ CapturedProcess run_capture(const std::vector<std::string>& argv, int timeout_se
 // ---------------------------------------------------------------------------
 namespace {
 
-bool looks_like_clang(const std::string& compiler) {
-  const std::string base = [&] {
-    std::size_t slash = compiler.find_last_of('/');
-    return slash == std::string::npos ? compiler : compiler.substr(slash + 1);
-  }();
-  return base.find("clang") != std::string::npos;
-}
+}  // namespace
+
+namespace {
 
 /// Creates and removes a temp file used to probe compiler capabilities.
 class TempFile {
@@ -395,7 +391,6 @@ class TempFile {
 
 DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_seconds) {
   DiagnosticFlags flags;
-  const bool clang_like = looks_like_clang(compiler);
 
   // Probing spawns the compiler twice, and a repair loop constructs a few
   // Compiler objects.  Cache per (compiler, binary mtime) so the cost is paid
@@ -454,17 +449,17 @@ DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_
     return !j.is_discarded();
   };
 
-  if (clang_like) {
-    if (accepts_json("-fjson-diagnostics")) {
-      flags.uses_json = true;
-      flags.json_flag = "-fjson-diagnostics";
-    } else if (accepts_json("-fdiagnostics-format=json")) {
-      flags.uses_json = true;
-      flags.json_flag = "-fdiagnostics-format=json";
-    } else {
-      // Clang that supports neither flag: the text fallback keeps diagnostics usable.
-      flags.uses_json = false;
-    }
+  // Probed for every compiler, never inferred from its name.  GCC rejects both
+  // JSON flags, so it lands on the text dialect -- but it does so because it was
+  // asked, not because of how its path looks.  A wrapper script named `g++` that
+  // happens to sit next to a clang binary is a real configuration, and name
+  // sniffing got it wrong.
+  if (accepts_json("-fjson-diagnostics")) {
+    flags.uses_json = true;
+    flags.json_flag = "-fjson-diagnostics";
+  } else if (accepts_json("-fdiagnostics-format=json")) {
+    flags.uses_json = true;
+    flags.json_flag = "-fdiagnostics-format=json";
   }
 
   // Independent of the dialect: does this compiler know `-ferror-limit`?  GCC does
@@ -480,16 +475,22 @@ DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_
 }
 
 Compiler::Compiler(CompilerConfig cfg) : cfg_(std::move(cfg)) {
+  // Every mode asks the compiler what it accepts.  Only the *parsing* mode is
+  // forced; the optional flags are never assumed, because the default
+  // (`supports_error_limit = true`) would send a clang-only flag to GCC and make
+  // it exit without compiling anything -- the failure this probing exists for.
+  const DiagnosticFlags probed = probe_diagnostic_flags(cfg_.compiler);
   switch (cfg_.format) {
     case CompilerConfig::DiagnosticFormat::Text:
+      resolved_ = probed;
       resolved_.uses_json = false;
       break;
     case CompilerConfig::DiagnosticFormat::Json:
+      resolved_ = probed;
       resolved_.uses_json = true;
-      resolved_.json_flag = looks_like_clang(cfg_.compiler) ? "-fjson-diagnostics" : "";
       break;
     case CompilerConfig::DiagnosticFormat::Auto:
-      resolved_ = probe_diagnostic_flags(cfg_.compiler);
+      resolved_ = probed;
       break;
   }
 }
