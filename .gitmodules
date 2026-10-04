@@ -1,0 +1,22 @@
+# FixIt vendors its four dependencies as a pinned source snapshot under
+# third_party/ so that a clone builds offline and reproducibly.  The snapshot is
+# the default; cmake/ThirdParty.cmake falls back to FetchContent against exactly
+# these upstream revisions whenever a component is missing from third_party/.
+#
+# The dependency set is deliberately fixed by the project brief (tree-sitter,
+# tree-sitter-cpp, cpp-httplib, nlohmann/json, Catch2) and nothing else may be
+# introduced.  ADR-006 in docs/decisions.md records why both mechanisms exist.
+#
+# Upstream revisions of the vendored snapshot:
+#
+#   path                          repository                                    revision
+#   third_party/tree-sitter       https://github.com/tree-sitter/tree-sitter     v0.26.13 line (language ABI 15)
+#   third_party/tree-sitter-cpp   https://github.com/tree-sitter/tree-sitter-cpp v0.23.4
+#   third_party/cpp-httplib       https://github.com/yhirose/cpp-httplib         v0.28.0
+#   third_party/json              https://github.com/nlohmann/json               v3.12.0
+#   third_party/Catch2            https://github.com/catchorg/Catch2             v3.8.1
+#
+# To switch to real submodules instead, run (once per component):
+#   git submodule add <repository> <path>
+#   git submodule set-branch --branch <tag> <path>
+# and drop the corresponding directory from the vendored snapshot.
