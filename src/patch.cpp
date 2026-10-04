@@ -92,14 +92,14 @@ std::string describe_score(double score) {
 }
 
 // ---------------------------------------------------------------------------
-// Candidate evaluation
+// Position convention
 //
-// Position convention used throughout this file: candidate positions are
-// 0-based indices into the file's line vector.  A candidate `pos` means the
-// signature would occupy file lines [pos, pos + signature.size()).  The
-// 1-based line numbers that users see are derived only when a report is built
-// (`pos + 1`).  Keeping one convention in the search path avoids the classic
-// off-by-one between "the line the model wrote" and "the line in the file".
+// A candidate position is the *0-based element index* of the first file line the
+// hunk would occupy: the signature is compared against file_lines[pos + i], and
+// the splice inserts before element `pos`.  `HunkReport` converts to the 1-based
+// line number a human reads exactly once, at the edge (`pos + 1`).  Search,
+// scoring and splicing therefore share one convention; the only `+ 1` in the
+// engine is in the report writer.  ADR-001 records why this matters.
 // ---------------------------------------------------------------------------
 struct Evaluation {
   int exact = 0;
@@ -220,7 +220,15 @@ SearchOutcome search_hunk(const std::vector<std::string>& file_lines, std::size_
         consider(static_cast<std::size_t>(candidate));
       }
     }
-    if (out.found && out.best.score >= 1.0) break;
+    // A perfect score inside this window does not end the search: when several
+    // positions match equally well (identical blocks are common in real code),
+    // the hunk belongs to the one nearest the declared position, and a nearer
+    // candidate may still be found by widening.  The outer fallback below is
+    // skipped, so a perfect match never triggers a whole-file scan.
+    if (out.found && out.best.score >= 1.0) {
+      out.tried_max = std::max(out.tried_max, radius + 2);
+      break;
+    }
   }
 
   if (global_fallback) {
@@ -430,6 +438,8 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       // --- anchored search with widening windows --------------------------
       SearchOutcome outcome =
           search_hunk(lines, anchor, hunk.old_lines, normalized_signature, cfg_, false);
+      // Widen to the whole file only when the ladder found nothing usable: a
+      // perfect candidate inside the ladder is already the closest match.
       if (!outcome.found || outcome.best.score < cfg_.gate) {
         const SearchOutcome global =
             search_hunk(lines, anchor, hunk.old_lines, normalized_signature, cfg_, true);
@@ -448,6 +458,7 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
           outcome.found && outcome.best.score >= cfg_.gate && outcome.best.exact >= 1;
 
       if (passes_gate) {
+        // 0-based element index of the first replaced line.
         const std::size_t pos = static_cast<std::size_t>(outcome.best.pos);
         // The hunk header is authoritative about how many file lines the hunk
         // consumes: a model that omits context still declares the true count.
@@ -477,7 +488,7 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
         lines = std::move(spliced);
         delta += static_cast<int>(replacement.size()) - static_cast<int>(count);
 
-        report.matched_pos = static_cast<int>(pos) + 1;
+        report.matched_pos = outcome.best.pos + 1;  // 1-based for humans
         report.score = outcome.best.score;
         report.status = (pos == anchor) ? HunkReport::Status::Applied
                                         : HunkReport::Status::FuzzyApplied;

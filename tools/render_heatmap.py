@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Renders docs/patch_success_matrix.json as a dependency-free SVG heat map.
+
+    python3 tools/render_heatmap.py [matrix.json] [heatmap.svg]
+
+No plotting library is needed: the file is plain SVG text, so it renders in a
+browser, in GitHub's Markdown preview and in most wiki engines, and it diffs
+sensibly in git.  The Wiki page embeds the result (see docs/wiki_outline.md).
+"""
+
+import json
+import os
+import sys
+
+# Colour ramp: red (does not apply) -> amber -> green (applies exactly).
+STOPS = [
+    (0.00, (0xB4, 0x23, 0x18)),
+    (0.50, (0xE6, 0x8A, 0x00)),
+    (0.80, (0xF2, 0xC0, 0x3A)),
+    (1.00, (0x2E, 0x7D, 0x32)),
+]
+
+
+def colour(rate):
+    """Linear interpolation across STOPS; returns '#rrggbb'."""
+    rate = max(0.0, min(1.0, rate))
+    for i in range(len(STOPS) - 1):
+        lo_rate, lo_rgb = STOPS[i]
+        hi_rate, hi_rgb = STOPS[i + 1]
+        if lo_rate <= rate <= hi_rate:
+            span = hi_rate - lo_rate
+            t = 0.0 if span == 0 else (rate - lo_rate) / span
+            rgb = tuple(
+                int(round(lo_rgb[k] + (hi_rgb[k] - lo_rgb[k]) * t)) for k in range(3)
+            )
+            return "#{:02x}{:02x}{:02x}".format(*rgb)
+    return "#2e7d32"
+
+
+def text_colour(rate):
+    """White on the dark end of the ramp, near-black on the light end."""
+    return "#ffffff" if rate < 0.55 else "#1a1a1a"
+
+
+def build_grid(doc, grid_key, title, subtitle):
+    cells = doc.get(grid_key, [])
+    drifts = doc.get("drifts", [])
+    impairments = doc.get("impairments", [])
+    if not cells or not drifts or not impairments:
+        raise SystemExit(f"{grid_key}: matrix is empty")
+
+    lookup = {(c["impairment"], c["drift"]): c["apply_rate"] for c in cells}
+
+    cell_w, cell_h = 96, 52
+    pad_left, pad_top, pad_right, pad_bottom = 170, 118, 40, 92
+    width = pad_left + cell_w * len(drifts) + pad_right
+    height = pad_top + cell_h * len(impairments) + pad_bottom
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" font-family="-apple-system, Segoe UI, '
+        f'Helvetica, Arial, sans-serif">',
+        f'<rect width="{width}" height="{height}" fill="#ffffff"/>',
+        f'<text x="{pad_left}" y="40" font-size="21" font-weight="600" fill="#111">{title}</text>',
+        f'<text x="{pad_left}" y="66" font-size="13" fill="#555">{subtitle}</text>',
+        f'<text x="{pad_left}" y="92" font-size="12" fill="#777">declared-position drift '
+        f'(lines, both directions)</text>',
+    ]
+
+    # column headers
+    for j, drift in enumerate(drifts):
+        x = pad_left + j * cell_w + cell_w / 2
+        label = f"+{drift}" if drift > 0 else str(drift)
+        parts.append(
+            f'<text x="{x:.0f}" y="{pad_top - 12}" font-size="13" text-anchor="middle" '
+            f'fill="#333">{label}</text>'
+        )
+
+    # rows
+    for i, impairment in enumerate(impairments):
+        y = pad_top + i * cell_h
+        parts.append(
+            f'<text x="{pad_left - 14}" y="{y + cell_h / 2 + 5:.0f}" font-size="13" '
+            f'text-anchor="end" fill="#333">{impairment}</text>'
+        )
+        for j, drift in enumerate(drifts):
+            rate = lookup.get((impairment, drift), 0.0)
+            x = pad_left + j * cell_w
+            fill = colour(rate)
+            parts.append(
+                f'<rect x="{x}" y="{y}" width="{cell_w - 6}" height="{cell_h - 6}" '
+                f'rx="4" fill="{fill}"/>'
+            )
+            parts.append(
+                f'<text x="{x + (cell_w - 6) / 2:.0f}" y="{y + cell_h / 2 + 5:.0f}" '
+                f'font-size="15" font-weight="600" text-anchor="middle" '
+                f'fill="{text_colour(rate)}">{round(rate * 100)}%</text>'
+            )
+
+    # legend
+    legend_y = pad_top + cell_h * len(impairments) + 28
+    parts.append(
+        f'<text x="{pad_left}" y="{legend_y}" font-size="12" fill="#555">'
+        f'apply rate (hunk applied AND landed on the replaced line)</text>'
+    )
+    steps = 12
+    sw = 26
+    for s in range(steps):
+        rate = s / (steps - 1)
+        parts.append(
+            f'<rect x="{pad_left + s * sw}" y="{legend_y + 10}" width="{sw}" height="14" '
+            f'fill="{colour(rate)}"/>'
+        )
+    parts.append(
+        f'<text x="{pad_left}" y="{legend_y + 42}" font-size="11" fill="#777">0%</text>'
+    )
+    parts.append(
+        f'<text x="{pad_left + steps * sw}" y="{legend_y + 42}" font-size="11" '
+        f'fill="#777" text-anchor="end">100%</text>'
+    )
+
+    config = doc.get("config", {})
+    parts.append(
+        f'<text x="{width - pad_right}" y="{height - 20}" font-size="11" fill="#999" '
+        f'text-anchor="end">max_drift={config.get("max_drift")} '
+        f'gate={config.get("gate")} '
+        f'fuzzy_line_threshold={config.get("fuzzy_line_threshold")} '
+        f'· generated by tools/matrix.cpp</text>'
+    )
+    parts.append("</svg>")
+    return "\n".join(parts) + "\n"
+
+
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    matrix_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        here, "..", "docs", "patch_success_matrix.json"
+    )
+    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
+        here, "..", "docs", "patch_success_heatmap.svg"
+    )
+
+    with open(matrix_path) as handle:
+        doc = json.load(handle)
+
+    real = build_grid(
+        doc,
+        "grid",
+        "FixIt patch apply rate",
+        f"{doc.get('context_lines')} context lines each side, {doc.get('base_file_lines')}-line "
+        "file, 200 trials per cell, well-formed diffs",
+    )
+    ambiguous = build_grid(
+        doc,
+        "ambiguous_grid",
+        "FixIt patch apply rate - shared-context corpus",
+        "repeated boilerplate around a unique changed line: realistic drift",
+    )
+    pathological = build_grid(
+        doc,
+        "identical_grid",
+        "FixIt patch apply rate - ambiguous corpus",
+        "every block byte-identical: the context cannot identify the target, so only the "
+        "declared position can",
+    )
+
+    with open(out_path, "w") as handle:
+        handle.write(real)
+    for suffix, content in (("_shared_context.svg", ambiguous), ("_ambiguous.svg", pathological)):
+        with open(out_path.replace(".svg", suffix), "w") as handle:
+            handle.write(content)
+
+    print(f"wrote {out_path}")
+    print(f"wrote {out_path.replace('.svg', '_shared_context.svg')}")
+    print(f"wrote {out_path.replace('.svg', '_ambiguous.svg')}")
+
+
+if __name__ == "__main__":
+    main()

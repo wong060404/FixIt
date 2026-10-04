@@ -328,3 +328,32 @@ the *only* intentionally non-deterministic field — it is never part of the tra
 
 **Rationale.** The Wiki's success-rate chapter needs stable counts, and keeping
 the clock out of the trace is what makes the determinism test meaningful.
+
+---
+
+## ADR-016 — How the effectiveness numbers are produced
+
+**Context.** The W3 milestone asks for a success-rate matrix and a heat map. A
+hand-made chart would be unfalsifiable.
+
+**Decision.** `tools/matrix.cpp` builds the corpus, the diffs and the runs, and
+prints both the table and `docs/patch_success_matrix.json`;
+`tools/render_heatmap.py` renders that JSON into three dependency-free SVGs.
+Every diff the tool generates is *well formed* (the `@@` counts equal the lines
+actually quoted); the impairment is always in the context content or shape, never
+in the header arithmetic, because a malformed header is a different and
+uninteresting failure. A trial counts only when the hunk applied **and** the
+repaired line replaced the intended line: a repair that lands on the wrong line
+is a miss.
+
+**Rationale.** The numbers in the README and the Wiki must be reproducible by
+anyone with the repository, and they must not flatter the engine. The measured
+result — 100% to ±20 lines of drift on realistic corpora, 0% past ±2 once every
+candidate is byte-identical — is the honest shape of the technique.
+
+**Consequence for the window ladder.** A perfect score inside a window no longer
+ends the search: when several positions match equally well, the hunk belongs to
+the one nearest the declared position, and a nearer candidate may still be found
+by widening. The whole-file fallback is skipped once a perfect candidate exists,
+so the common case stays cheap. This is the spec's "track the global best plus
+distance tie-break" intent, made explicit.

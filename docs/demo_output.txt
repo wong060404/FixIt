@@ -32,7 +32,7 @@ $ clang++ -fsyntax-only e1_missing_include.cpp
     ✓ hunk 1 @ L11   (fuzzy, drift-1)
 $ clang++ -fsyntax-only e1_missing_include.cpp
   ✓ clean
-✔ Fixed 5 errors in 2 iterations (0.9s)
+✔ Fixed 5 errors in 2 iterations (4.0s)
 
 ========================================================================
 $ fixit e2_drift.cpp --agent --llm mock --verbose --compiler clang++
@@ -59,7 +59,7 @@ $ clang++ -fsyntax-only e2_drift.cpp
     ✓ hunk 1 @ L48   (fuzzy, drift-1)
 $ clang++ -fsyntax-only e2_drift.cpp
   ✓ clean
-✔ Fixed 5 errors in 2 iterations (0.9s)
+✔ Fixed 5 errors in 2 iterations (3.6s)
 
 ========================================================================
 $ fixit e3_type_error.cpp --agent --llm mock --verbose --compiler clang++
@@ -72,7 +72,7 @@ $ clang++ -fsyntax-only e3_type_error.cpp
     [E1]   L13   no matching function for call to 'count_words'
     [E2]   L14   use of undeclared identifier 'count_missing_words'
   → context: fn main() [L11–L16]
-✗ Not fixed after 1 iterations (0.5s)
+✗ Not fixed after 1 iterations (1.9s)
   remaining errors:
     [E1]   L13   no matching function for call to 'count_words'
     [E2]   L14   use of undeclared identifier 'count_missing_words'

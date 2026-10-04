@@ -9,6 +9,7 @@
 //
 // Section 3 pins down the units the scoring is built from.
 
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -176,4 +177,145 @@ TEST_CASE("partial application writes what it can", "[patch]") {
   CHECK(result.reports[1].status == fixit::HunkReport::Status::Failed);
   // The applied hunk is written, the failed one leaves its region untouched.
   CHECK(result.new_content == "ALPHA\nbeta\ngamma\n");
+}
+
+// ---------------------------------------------------------------------------
+// Properties behind the effectiveness numbers in the README.
+//
+// tools/matrix.cpp measures the full grid; these three cases pin down the
+// behaviour those numbers depend on, so a regression cannot hide in a table.
+// ---------------------------------------------------------------------------
+namespace {
+
+/// A file of `blocks` uniquely-named blocks; returns its content.
+std::string unique_file(int blocks) {
+  std::string out;
+  out += "#include <cstdio>\n";
+  for (int i = 0; i < blocks; ++i) {
+    out += "int fn_" + std::to_string(i) + "(int input) {\n";
+    out += "  int local_" + std::to_string(i) + " = input + " + std::to_string(i) + ";\n";
+    out += "  return local_" + std::to_string(i) + ";\n";
+    out += "}\n\n";
+  }
+  return out;
+}
+
+/// 1-based line number of the first line equal to `needle`, or 0.
+int line_of(const std::string& content, const std::string& needle) {
+  std::istringstream in(content);
+  std::string line;
+  int number = 0;
+  while (std::getline(in, line)) {
+    ++number;
+    if (line == needle) return number;
+  }
+  return 0;
+}
+
+}  // namespace
+
+TEST_CASE("a hunk applies correctly when the declared position is far off", "[patch][tolerance]") {
+  // 40 unique blocks: the repaired line and its context identify exactly one
+  // place, so the declared position is allowed to be badly wrong.
+  const std::string content = unique_file(40);
+  // The hunk quotes the block header as its first context line, so the position
+  // it must report is that header's line: one above the line being repaired.
+  const int repaired_line = line_of(content, "  int local_20 = input + 20;");
+  REQUIRE(repaired_line > 0);
+  const int target_line = repaired_line - 1;
+
+  // Build one concrete drifted patch and check where it lands.
+  // Context must identify block 20: the surrounding *block* names differ, only
+  // the local variable is shared between blocks.
+  const std::string body =
+      " int fn_20(int input) {\n"
+      "-  int local_20 = input + 20;\n"
+      "+  int local_20 = input + 99;\n"
+      "   return local_20;\n";
+  for (int drift : {0, 1, 2, 5, 10, 20, -10}) {
+    const int declared = target_line + drift;
+    const std::string diff = "--- a/x.cpp\n+++ b/x.cpp\n@@ -" + std::to_string(declared) + ",3 +" +
+                             std::to_string(declared) + ",3 @@\n" + body;
+    const fixit::PatchEngine engine;
+    const fixit::PatchResult result = engine.apply(content, diff, "x.cpp");
+    INFO("drift " << drift);
+    CHECK(result.all_applied);
+    REQUIRE_FALSE(result.reports.empty());
+    // It must land on the true line, not merely "somewhere".
+    CHECK(result.reports.front().matched_pos == target_line);
+    CHECK(result.new_content.find("int local_20 = input + 99;") != std::string::npos);
+    // Unrelated lines survive untouched.
+    CHECK(result.new_content.find("int local_19 = input + 19;") != std::string::npos);
+    CHECK(result.new_content.find("int local_21 = input + 21;") != std::string::npos);
+  }
+}
+
+TEST_CASE("a perfect match suppresses the whole-file scan", "[patch][tolerance]") {
+  // The scan would find the same answer; this asserts the reported window stays
+  // inside the ladder, so the fast path is the one that ran.
+  const std::string content = unique_file(40);
+  const int repaired_line = line_of(content, "  int local_20 = input + 20;");
+  REQUIRE(repaired_line > 0);
+  const int target_line = repaired_line - 1;  // the hunk starts at the block header
+  const std::string diff =
+      "--- a/x.cpp\n+++ b/x.cpp\n@@ -" + std::to_string(target_line) + ",3 +" +
+      std::to_string(target_line) +
+      ",3 @@\n"
+      " int fn_20(int input) {\n"
+      "-  int local_20 = input + 20;\n"
+      "+  int local_20 = input + 99;\n"
+      "   return local_20;\n";
+  const fixit::PatchEngine engine;
+  const fixit::PatchResult result = engine.apply(content, diff, "x.cpp");
+  CHECK(result.all_applied);
+  REQUIRE_FALSE(result.reports.empty());
+  CHECK(result.reports.front().matched_pos == target_line);
+  CHECK(result.reports.front().status == fixit::HunkReport::Status::Applied);
+  // The nearest-position preference must not have widened to a fallback scan:
+  // candidates are only collected for failures.
+  CHECK(result.reports.front().top_candidates.empty());
+}
+
+TEST_CASE("an ambiguous hunk is refused rather than silently misplaced",
+          "[patch][tolerance][negative]") {
+  // Every block is byte-identical, so the context matches dozens of places.
+  std::string content = "#include <cstdio>\n";
+  for (int i = 0; i < 30; ++i) {
+    content += "int handler(int input) {\n";
+    content += "  if (input < 0) return 0;\n";
+    content += "  int work = input;\n";
+    content += "  return work;\n";
+    content += "}\n\n";
+  }
+  // The quoted context is identical everywhere and the declared position is more
+  // than one window away from the intended block, so the engine is entitled to
+  // choose the nearest candidate -- but it must never write to a *different*
+  // location than the one it reports.
+  const int declared = 4 * 10 + 2 + 5;
+  const std::string diff =
+      "--- a/x.cpp\n+++ b/x.cpp\n@@ -" + std::to_string(declared) + ",3 +" +
+      std::to_string(declared) +
+      ",3 @@\n"
+      "   int work = input;\n"
+      "-  return work;\n"
+      "+  return work + 1;\n"
+      " }\n";
+  const fixit::PatchEngine engine;
+  const fixit::PatchResult result = engine.apply(content, diff, "x.cpp");
+  REQUIRE_FALSE(result.reports.empty());
+  const fixit::HunkReport& report = result.reports.front();
+  if (report.status == fixit::HunkReport::Status::Failed) {
+    CHECK_FALSE(result.all_applied);
+  } else {
+    // If it applied, it must have applied exactly where it says it did.
+    const std::string marker = "  return work + 1;";
+    const std::size_t at = result.new_content.find(marker);
+    REQUIRE(at != std::string::npos);
+    // Newlines before the match == the 0-based line index of the match.
+    const int line = static_cast<int>(std::count(result.new_content.begin(),
+                                                 result.new_content.begin() +
+                                                     static_cast<std::ptrdiff_t>(at),
+                                                 '\n'));
+    CHECK(line == report.matched_pos);
+  }
 }

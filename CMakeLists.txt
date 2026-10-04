@@ -72,6 +72,18 @@ if(FIXIT_BUILD_CLI)
 endif()
 
 # ---------------------------------------------------------------------------
+# Tooling: the patch-tolerance matrix behind the Wiki heat map
+# ---------------------------------------------------------------------------
+option(FIXIT_BUILD_TOOLS "Build the measurement tools (patch success matrix)" ON)
+if(FIXIT_BUILD_TOOLS)
+  add_executable(fixit-matrix tools/matrix.cpp)
+  target_link_libraries(fixit-matrix PRIVATE fixit)
+  if(NOT MSVC)
+    target_compile_options(fixit-matrix PRIVATE -Wall -Wextra -Werror)
+  endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 if(FIXIT_BUILD_TESTS)

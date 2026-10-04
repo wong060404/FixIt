@@ -280,6 +280,26 @@ surface (`include/fixit/*.h`), no globals, no CLI dependency. A CI repair bot ca
 use just `Compiler` + `PatchEngine`; an IDE plugin can use `CodeMap` alone; an
 agent product can take the whole `Agent`.
 
+## 8a. Measured effectiveness
+
+`./build/bin/fixit-matrix` sweeps well-formed diffs whose imperfection is
+controlled, and `python3 tools/render_heatmap.py` turns the result into the heat
+maps under `docs/`. Current numbers (200 trials per cell):
+
+| Corpus | Drift tolerance |
+|---|---|
+| Unique lines, 3 context lines | **100%** up to ±20 lines of drift, 99% at ±50 |
+| Realistic boilerplate (`}`, blank lines, near-identical bodies) | **100%** up to ±20, 99% at ±50 |
+| Every block byte-identical | 100% up to ±2, **0% at ±5 and beyond** |
+
+The first two rows are the claim the project makes. The third row is its honest
+limit: when the context matches several places equally well *and* the declared
+position is wrong, no algorithm can recover the intent — FixIt applies to the
+nearest candidate, which the sweep counts as a miss. Both the trailing-whitespace
+and the missing-context impairments are included in every row. See
+[`docs/wiki_outline.md`](docs/wiki_outline.md) and
+[`docs/patch_success_matrix.json`](docs/patch_success_matrix.json).
+
 ## 9. Roadmap
 
 * **Real-LLM evaluation** — the harness is ready (`--llm openai --base-url`); the
