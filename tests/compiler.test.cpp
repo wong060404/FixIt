@@ -461,16 +461,34 @@ TEST_CASE("real gcc and real clang both diagnose the shipped examples",
       CHECK(clang_first >= 1);
       CHECK(clang_first <= line_count);
 
-      const auto mentions_vector = [](const std::vector<fixit::Diagnostic>& diagnostics) {
-        return std::any_of(diagnostics.begin(), diagnostics.end(),
-                           [](const fixit::Diagnostic& d) {
-                             return d.message.find("vector") != std::string::npos;
-                           });
-      };
-      INFO("gcc names vector  : " << mentions_vector(gcc_result.diagnostics));
-      INFO("clang names vector: " << mentions_vector(clang_result.diagnostics));
-      CHECK(mentions_vector(gcc_result.diagnostics));
-      CHECK(mentions_vector(clang_result.diagnostics));
+      // e1 and e2 are built around a `vector` that no include provides; e3 is the
+      // type-error example and has no vector at all, so the symbol check only
+      // applies where the fault exists.
+      if (name != "e3_type_error") {
+        const auto mentions = [](const std::vector<fixit::Diagnostic>& diagnostics,
+                                 const std::string& needle) {
+          return std::any_of(diagnostics.begin(), diagnostics.end(),
+                             [&](const fixit::Diagnostic& d) {
+                               return d.message.find(needle) != std::string::npos;
+                             });
+        };
+        INFO("gcc names vector  : " << mentions(gcc_result.diagnostics, "vector"));
+        INFO("clang names vector: " << mentions(clang_result.diagnostics, "vector"));
+        CHECK(mentions(gcc_result.diagnostics, "vector"));
+        CHECK(mentions(clang_result.diagnostics, "vector"));
+      } else {
+        // e3's fault is a call with the wrong argument type plus an unknown
+        // function; both compilers must name at least one of them.
+        const auto names_symbol = [](const std::vector<fixit::Diagnostic>& diagnostics) {
+          return std::any_of(diagnostics.begin(), diagnostics.end(),
+                             [](const fixit::Diagnostic& d) {
+                               return d.message.find("count_words") != std::string::npos ||
+                                      d.message.find("count_missing_words") != std::string::npos;
+                             });
+        };
+        CHECK(names_symbol(gcc_result.diagnostics));
+        CHECK(names_symbol(clang_result.diagnostics));
+      }
     }
   }
 }
