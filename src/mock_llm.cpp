@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -222,17 +223,38 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
     // The same failure mode, as each compiler words it:
     //   clang: "no member named 'vector' in namespace 'std'"
     //          "use of undeclared identifier 'x'"
-    //   GCC  : "'vector' in namespace 'std' does not name a template type"
+    //   GCC  : "'vector' is not a member of 'std'"
     //          "'x' was not declared in this scope"
     // Quotes are already normalised to ASCII by parse_diagnostics(), so one
     // spelling suffices here.
-    return contains(message, "was not declared") || contains(message, "not declared in this scope") ||
-           contains(message, "no member named") || contains(message, "does not name a");
+    return contains(message, "undeclared identifier") || contains(message, "was not declared") ||
+           contains(message, "not declared in this scope") || contains(message, "no member named") ||
+           contains(message, "does not name a") || contains(message, "is not a member of");
   };
 
   // Only real `#include` directives count -- a usage such as
   // `std::vector<std::string> words;` contains "<vector>" too, and treating that
   // as an existing include would make the rule add nothing.
+  // Some diagnostics name the symbol without quotes -- clang's "use of
+  // undeclared identifier 'x'" does quote it, but "no member named x" forms and
+  // several GCC messages do not.  Fall back to the identifier after the phrase.
+  const auto bare_symbol = [](const std::string& message, const std::string& phrase) {
+    const std::size_t at = message.find(phrase);
+    if (at == std::string::npos) return std::string();
+    std::size_t begin = at + phrase.size();
+    while (begin < message.size() && message[begin] == ' ') ++begin;
+    std::size_t end = begin;
+    while (end < message.size()) {
+      const char c = message[end];
+      if (std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_') {
+        ++end;
+      } else {
+        break;
+      }
+    }
+    return message.substr(begin, end - begin);
+  };
+
   const auto include_already_present = [](const std::vector<std::string>& lines,
                                           const std::string& header) {
     for (const std::string& line : lines) {
@@ -255,8 +277,13 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
 
     std::string body;
     std::vector<std::string> added_headers;
+    // Symbols can be quoted or bare depending on the compiler and the phrasing.
+    const std::string bare = bare_symbol(error.message, "undeclared identifier");
+    const std::string bare_scope = bare_symbol(error.message, "not declared in this scope");
     for (const auto& [symbol, header] : include_map()) {
-      if (!contains(error.message, "'" + symbol + "'")) continue;
+      const bool named = contains(error.message, "'" + symbol + "'") || bare == symbol ||
+                         bare_scope == symbol;
+      if (!named) continue;
       if (include_already_present(lines, header)) continue;
       // All symbols that need the same header fold into one #include.
       if (std::find(added_headers.begin(), added_headers.end(), header) != added_headers.end()) {

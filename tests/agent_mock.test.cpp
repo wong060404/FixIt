@@ -495,3 +495,84 @@ TEST_CASE("e3 stays beyond the mock rules on any standard library", "[agent][neg
   CHECK(matched >= 1);
   CHECK(compiled.diagnostics.front().line >= 1);
 }
+
+namespace {
+
+/// Feeds the mock a compile payload with one diagnostic and reports whether it
+/// proposed a patch.  `workdir` must contain `victim.cpp`: the include rule reads
+/// the real file to find where the last #include is.
+bool mock_repairs_message(const std::string& workdir, const std::string& message) {
+  fixit::MockLlm mock;
+  mock.set_workspace(workdir);
+  const std::string payload =
+      std::string("Task: x\nFile: victim.cpp\nCompile result:\n") +
+      nlohmann::json{{"clean", false},
+                     {"errors", nlohmann::json::array({nlohmann::json{{"file", "victim.cpp"},
+                                                                     {"line", 10},
+                                                                     {"col", 3},
+                                                                     {"message", message}}})}}
+          .dump(2);
+  const std::vector<fixit::Message> messages = {
+      fixit::Message{"user", payload, nlohmann::json::array(), nlohmann::json()}};
+  const fixit::LlmResponse response = mock.chat(messages, {});
+  return !response.tool_calls.empty();
+}
+
+}  // namespace
+
+TEST_CASE("the mock recognises each compiler's real wording", "[agent][mock][wording]") {
+  // Transcribed from the ubuntu/gcc-12 (GCC 12.4) and macOS (clang 17) CI jobs.
+  // Text is quoted exactly as the compilers emit it *after*
+  // fixit::normalize_quotes(), which is what the mock actually sees.  Guessing
+  // these strings -- an earlier revision matched "does not name a template type"
+  // when GCC says "is not a member of" -- made the mock silently find nothing to
+  // repair, so they are pinned here rather than in a comment.
+  const std::vector<std::string> repairable = {
+      // missing include, as each compiler words it
+      "'vector' is not a member of 'std'",
+      "no member named 'vector' in namespace 'std'",
+      // A header-mapped symbol whose header is *absent* from the fixture (it
+      // includes <string> only), so the rule has something to add.
+      "use of undeclared identifier 'vector'",
+      // missing semicolon
+      "expected ';' at end of declaration",
+      "expected ',' or ';' before 'return'",
+  };
+  Scratch scratch("wording");
+  // The rules need a real target: line 10 must be the line whose semicolon is
+  // missing, and the file must have an #include block for the include rule to
+  // insert after.
+  write_file(scratch.path() / "victim.cpp",
+             "#include <string>\n"          // 1
+             "\n"                            // 2
+             "int parse_count(const std::string& text) {\n"  // 3
+             "  int n = 3\n"                 // 4
+             "  return n;\n"                 // 5
+             "}\n"                           // 6
+             "\n"                            // 7
+             "int main() {\n"                // 8
+             "  int words = 1;\n"            // 9
+             "  return words\n"              // 10
+             "}\n");                         // 11
+
+  for (const std::string& message : repairable) {
+    INFO("message: " << message);
+    CHECK(mock_repairs_message(scratch.path().string(), message));
+  }
+
+  // Errors the mock has no rule for must still not produce a patch (R4): these
+  // are what make e3 the "a real model should try" fixture.
+  const std::vector<std::string> unrepairable = {
+      "could not convert 'value' from 'int' to 'const std::string&'",
+      "no matching function for call to 'count_words'",
+      "'count_missing_words' was not declared in this scope",
+      // An ordinary local is not in the symbol->header table, so no include can
+      // repair it: this is exactly the e3 case left to a real model.
+      "use of undeclared identifier 'words'",
+      "'words' was not declared in this scope",
+  };
+  for (const std::string& message : unrepairable) {
+    INFO("message: " << message);
+    CHECK_FALSE(mock_repairs_message(scratch.path().string(), message));
+  }
+}
