@@ -443,3 +443,58 @@ TEST_CASE("execution failures are never reported as clean", "[compiler][negative
     CHECK(result.clean());
   }
 }
+
+// ---------------------------------------------------------------------------
+// Environment diagnostic.
+//
+// Kept in the suite because it is the cheapest way to answer "what did the
+// compiler actually do?" on a machine we cannot log into.  It prints the
+// configured compiler, its version, the exact argv, the raw output and the
+// parsed diagnostics through Catch2's INFO mechanism, so a CI failure on an
+// unfamiliar toolchain explains itself instead of needing another guess.
+// ---------------------------------------------------------------------------
+TEST_CASE("compiler environment is reported", "[compiler][diagnostic]") {
+  std::ofstream probe("fixit-env-probe.cpp");
+  probe << "int main() { int x = 1 return x; }\n";
+  probe.close();
+
+  fixit::CompilerConfig config;
+#ifdef FIXIT_TEST_COMPILER
+  config.compiler = FIXIT_TEST_COMPILER;
+#endif
+
+  const auto shell = [](const std::string& command) {
+    std::string out;
+    FILE* pipe = ::popen((command + " 2>&1").c_str(), "r");
+    if (pipe == nullptr) return out;
+    char buffer[512];
+    std::size_t read = 0;
+    while ((read = std::fread(buffer, 1, sizeof(buffer), pipe)) > 0) out.append(buffer, read);
+    ::pclose(pipe);
+    return out;
+  };
+
+  const fixit::Compiler compiler(config);
+  const std::vector<std::string> argv = compiler.command_line("fixit-env-probe.cpp");
+  std::string command_line;
+  for (const std::string& arg : argv) command_line += arg + " ";
+
+  const fixit::CompileResult result = compiler.compile("fixit-env-probe.cpp");
+  INFO("configured compiler : " << config.compiler);
+  INFO("compiler version  : " << shell("'" + config.compiler + "' --version | head -1"));
+  INFO("uses json dialect : " << compiler.uses_json_diagnostics());
+  INFO("argv              : " << command_line);
+  INFO("exit code         : " << result.exit_code);
+  INFO("raw output        : [" << result.raw_output << "]");
+  INFO("parsed diagnostics: " << result.diagnostics.size());
+  for (const fixit::Diagnostic& d : result.diagnostics) {
+    INFO("  diag " << d.file << ":" << d.line << ":" << d.col << " " << d.message);
+  }
+
+  std::remove("fixit-env-probe.cpp");
+
+  // A deliberately broken file must produce at least one diagnostic on any
+  // supported compiler; this is the assertion the rest of the suite depends on.
+  CHECK(result.exit_code != 0);
+  CHECK_FALSE(result.diagnostics.empty());
+}
