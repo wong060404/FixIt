@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The spec requires gcc 12 and clang 15; both are preinstalled on the
+          # runner images, and the requested version is selected explicitly so a
+          # future image bump cannot silently change the compiler under test.
+          - name: ubuntu-latest / gcc-12
+            os: ubuntu-latest
+            cxx: g++-12
+            cc: gcc-12
+          - name: macos-latest / clang
+            os: macos-latest
+            cxx: clang++
+            cc: clang
+
+    steps:
+      - name: Check out (with submodules, if any)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install gcc-12 (ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-12 g++-12
+          g++-12 --version
+
+      - name: Report compiler versions
+        run: |
+          ${{ matrix.cc }} --version
+          cmake --version
+
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DFIXIT_TEST_COMPILER=${{ matrix.cxx }}
+
+      - name: Build
+        run: cmake --build build -j 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      # The demos are part of the acceptance criteria: e1 and e2 must be fixed
+      # by the mock (exit 0) and e3 must be left alone (exit 1).  --no-write
+      # repairs a scratch copy so the checkout stays clean.
+      - name: Demo smoke test
+        shell: bash
+        run: |
+          set -eux
+          BIN="$GITHUB_WORKSPACE/build/bin/fixit"
+          "$BIN" examples/buggy/e1_missing_include.cpp --agent --llm mock --verbose \
+            --compiler ${{ matrix.cxx }} --no-write
+          "$BIN" examples/buggy/e2_drift.cpp --agent --llm mock \
+            --compiler ${{ matrix.cxx }} --no-write
+          if "$BIN" examples/buggy/e3_type_error.cpp --agent --llm mock \
+               --compiler ${{ matrix.cxx }} --no-write; then
+            echo "e3 must NOT be fixed by the mock rules"; exit 1
+          fi
+          git diff --exit-code   # the demos must not have touched the tree
