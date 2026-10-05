@@ -125,12 +125,30 @@ TEST_CASE("parse_diff handles the documented shapes", "[patch][parse]") {
 TEST_CASE("insertions and deletions round-trip", "[patch]") {
   const fixit::PatchEngine engine;
 
-  SECTION("pure insertion goes in at the declared position") {
+  SECTION("pure insertion goes in after the declared line") {
+    // `@@ -l,0 +m,k @@` inserts AFTER line l -- GNU diff emits exactly this shape
+    // for an insertion and GNU patch honours it, so the engine must too.
     const std::string content = "one\ntwo\nthree\n";
-    const std::string diff = "--- a/f.cpp\n+++ b/f.cpp\n@@ -2,0 +2,1 @@\n+inserted\n";
+    const std::string diff = "--- a/f.cpp\n+++ b/f.cpp\n@@ -2,0 +3,1 @@\n+inserted\n";
     const fixit::PatchResult result = engine.apply(content, diff, "f.cpp");
     CHECK(result.all_applied);
-    CHECK(result.new_content == "one\ninserted\ntwo\nthree\n");
+    CHECK(result.new_content == "one\ntwo\ninserted\nthree\n");
+  }
+
+  SECTION("insertion at the very start") {
+    const std::string content = "one\ntwo\n";
+    const std::string diff = "--- a/f.cpp\n+++ b/f.cpp\n@@ -0,0 +1,1 @@\n+first\n";
+    const fixit::PatchResult result = engine.apply(content, diff, "f.cpp");
+    CHECK(result.all_applied);
+    CHECK(result.new_content == "first\none\ntwo\n");
+  }
+
+  SECTION("insertion at the very end") {
+    const std::string content = "one\ntwo\n";
+    const std::string diff = "--- a/f.cpp\n+++ b/f.cpp\n@@ -2,0 +3,1 @@\n+last\n";
+    const fixit::PatchResult result = engine.apply(content, diff, "f.cpp");
+    CHECK(result.all_applied);
+    CHECK(result.new_content == "one\ntwo\nlast\n");
   }
 
   SECTION("deletion removes the matched lines") {

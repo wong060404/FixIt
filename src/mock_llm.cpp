@@ -300,10 +300,14 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
       if (!next.empty()) body += "+\n";
     }
 
-    // True insertion point: right after the last #include.  The engine reads a
-    // pure insertion as "place the new lines before this 1-based line", so the
-    // rendered old_start is `last + 2` (see the Hunk::insert flag).
-    add_hunk(error.file, last + 2, body, /*insert=*/true);
+    // True insertion point: right after the last #include.  A pure insertion
+    // means "place the new lines AFTER the 1-based line old_start" (the standard
+    // unified-diff reading, matching GNU diff and patch), and for an insertion the
+    // rendered header is that same number -- so `last` is exactly the position
+    // wanted.  The earlier `last + 2` compensated for an engine that inserted
+    // *before* old_start and therefore landed the #include inside the next
+    // function.
+    add_hunk(error.file, last, body, /*insert=*/true);
     break;  // one include batch per round, like one edit a model would make
   }
 
@@ -363,9 +367,9 @@ LlmResponse MockLlm::chat(const std::vector<Message>& messages, const std::vecto
     // A single patch call carrying every hunk, each with the +1 drift applied.
     std::string diff = "--- a/" + file + "\n+++ b/" + file + "\n";
     for (const Hunk& hunk : hunks) {
-      // Every header carries the intentional +1 drift.  For an insertion the
-      // stored position is already the drifted anchor, because the engine
-      // places inserted lines *before* old_start.
+      // Every replacement header carries the intentional +1 drift.  An insertion
+      // stores its final position directly: the +1 shift used to absorb the
+      // engine placing inserts before old_start, which it no longer does.
       const int declared = hunk.insert ? hunk.position : hunk.position + 1;
       const int count = hunk.insert ? 0 : 1;
       diff += "@@ -" + std::to_string(declared) + "," + std::to_string(count) + " +" +

@@ -534,7 +534,11 @@ std::vector<std::string> Compiler::command_line(const std::string& source_file) 
   if (resolved_.supports_error_limit) {
     argv.push_back("-ferror-limit=" + std::to_string(cfg_.error_limit));
   }
-  if (!resolved_.json_flag.empty()) argv.push_back(resolved_.json_flag);
+  // Only ask for the JSON dialect when we are going to parse JSON.  Testing the
+  // flag alone sent `-fjson-diagnostics` even under DiagnosticFormat::Text,
+  // which made the compiler emit JSON that the text parser then read as zero
+  // diagnostics -- a failed compile that looked like it had no errors at all.
+  if (resolved_.uses_json && !resolved_.json_flag.empty()) argv.push_back(resolved_.json_flag);
   for (const std::string& flag : cfg_.extra_flags) argv.push_back(flag);
   argv.push_back(source_file);
   return argv;

@@ -2,6 +2,6 @@
 #include<string>
 int main() {
     std::string s = "Hello, World!";
-    std::cout << S;
+    std::cout << s;
     return 0;
 }

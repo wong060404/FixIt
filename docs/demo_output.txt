@@ -23,7 +23,7 @@ $ clang++ -fsyntax-only e1_missing_include.cpp
     [E5]   L14   expected expression
   → context: fn parse_count() [L9–L12]
   → patch…
-    ✓ hunk 1 @ L9    (exact)
+    ✓ hunk 1 @ L8    (exact)
 ── iteration 2 ----------------------------
 $ clang++ -fsyntax-only e1_missing_include.cpp
   ✗ 1 error
@@ -50,7 +50,7 @@ $ clang++ -fsyntax-only e2_drift.cpp
     [E5]   L53   use of undeclared identifier 'words'
   → context: fn parse_count() [L46–L49]
   → patch…
-    ✓ hunk 1 @ L7    (exact)
+    ✓ hunk 1 @ L6    (exact)
 ── iteration 2 ----------------------------
 $ clang++ -fsyntax-only e2_drift.cpp
   ✗ 1 error
@@ -145,12 +145,12 @@ trajectory for e1 (deterministic; timestamps excluded by design)
             {
                 "result": {
                     "all_applied": true,
-                    "failure_summary": "Patch applied for e1_missing_include.cpp:\n- Hunk 1: APPLIED @ line 9 (exact, score 1.00)\n",
+                    "failure_summary": "Patch applied for e1_missing_include.cpp:\n- Hunk 1: APPLIED @ line 8 (exact, score 1.00)\n",
                     "reports": [
                         {
-                            "declared_pos": 9,
+                            "declared_pos": 8,
                             "hunk": 1,
-                            "matched_pos": 9,
+                            "matched_pos": 8,
                             "score": 1.0,
                             "status": "applied"
                         }
@@ -163,7 +163,7 @@ trajectory for e1 (deterministic; timestamps excluded by design)
         "tool_calls": [
             {
                 "args": {
-                    "diff": "--- a/e1_missing_include.cpp\n+++ b/e1_missing_include.cpp\n@@ -9,0 +9,0 @@\n+#include <vector>\n",
+                    "diff": "--- a/e1_missing_include.cpp\n+++ b/e1_missing_include.cpp\n@@ -7,0 +7,0 @@\n+#include <vector>\n",
                     "file": "e1_missing_include.cpp"
                 },
                 "name": "patch"
@@ -234,8 +234,8 @@ final content of the repaired e1
 // order, and the missing ';' masks the header error on clang's first pass --
 // which is exactly the situation the repair loop exists for.
 #include <string>
-
 #include <vector>
+
 int parse_count(const std::string& text) {
   int n = 3;
   return n;

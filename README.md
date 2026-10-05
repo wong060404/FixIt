@@ -46,8 +46,8 @@ FixIt closes that circle:
 ## 3. Quick Start
 
 ```bash
-git clone <your-fork-url> fixit
-cd fixit
+git clone https://github.com/wong060404/FixIt.git
+cd FixIt
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure
 ```
 
@@ -63,6 +63,12 @@ the network.
 That command repairs the example in place. Add `--no-write` to repair a scratch
 copy instead and leave the working tree byte-identical — which is what the CI
 smoke test and the recorded demo use, so both can be re-run at any time.
+
+`--llm mock` is the built-in offline model: it repairs two specific fault shapes
+and is what the test suite and demo use. To repair arbitrary code with your own
+model, see [§6.6 Using a real model over https](#66-using-a-real-model-over-https);
+to repair a file that includes project headers, see
+[§6.5](#65-repairing-a-file-that-has-project-headers).
 
 ### Requirements
 
@@ -273,7 +279,7 @@ emits a patch it deliberately declares the wrong line (`+1`), so every demo also
 exercises the fuzzy path. `OpenAiLlm` speaks `/v1/chat/completions` over
 `cpp-httplib`.
 
-### 6.4 Repairing a file that has project headers
+### 6.5 Repairing a file that has project headers
 
 `fixit` starts its own compiler, so a file that includes a project header needs to
 be told where that header lives:
@@ -295,7 +301,7 @@ the real errors.  Easiest habit: run `fixit` from the directory you would normal
 compile from, with the same `-I` flags you already use, or let
 `compile_commands.json` tell you what they are.
 
-### 6.5 Using a real model over https
+### 6.6 Using a real model over https
 
 The default build has no TLS, because OpenSSL is not one of the four permitted
 dependencies.  `https://` endpoints therefore need a TLS-enabled build:
@@ -333,13 +339,14 @@ key from `$FIXIT_API_KEY` or a git-ignored `.secrets/fixit_key`, keeps it out of
 `argv` (so it cannot appear in `ps` output or a log), and unexports it before the
 child runs, so no trace or metrics file can contain it.
 
-### 6.5 CLI
+### 6.7 CLI
 
 ```
 fixit <file.cpp> [--agent] [--llm mock|openai] [--model NAME]
       [--base-url URL] [--api-key KEY | env FIXIT_API_KEY]
       [--iterations N] [--verbose] [--trace PATH] [--metrics PATH]
-      [--compiler NAME] [--no-write]
+      [--compiler NAME] [--no-write] [--no-timing] [--outline]
+      [-I DIR | --include DIR]... [-D NAME[=VALUE]]... [--flag FLAG]...
 ```
 
 Without `--agent` it compiles once and prints the diagnostics. Exit codes:
@@ -350,7 +357,7 @@ wall-clock reports so output can be diffed between runs — that is how
 stdout is not a TTY or `NO_COLOR` is set, which keeps `docs/demo_output.txt`
 diffable.
 
-## 6.6 Regression worth knowing about
+### 6.8 Regression worth knowing about
 
 A hunk that **inserts** lines while quoting surrounding context used to consume one
 file line too many, silently deleting the line after the insertion point.  It was
@@ -372,12 +379,12 @@ ctest --test-dir build --output-on-failure
 
 | Suite | Contents |
 |---|---|
-| `patch_golden.test` | **60 golden patches** (10 exact, 10 line-drift, 10 whitespace, 10 missing-context, 10 extra-context, 10 multi-hunk) asserting `all_applied` and byte-exact output, plus **10 negative cases** asserting refusal, untouched content, and a `failure_reason` that contains the score, the gate, the window and the offending line |
-| `compiler.test` | 20 fixtures (recorded clang output + GCC-format output) and a gcc/clang **parity** check over `e1`–`e3`: identical `(line, col)` sets |
+| `patch_golden.test` | **60 golden patches** (10 exact, 10 line-drift, 10 whitespace, 10 missing-context, 10 extra-context, 10 multi-hunk) asserting `all_applied` and byte-exact output, plus **10 negative cases** asserting refusal, untouched content, and a `failure_reason` that contains the score, the gate, the window and the offending line; plus insertion/deletion round-trips and the regression for the insertion hunk that used to consume the following line |
+| `compiler.test` | 20 fixtures (recorded clang output + GCC-format output); a gcc/clang **parity** check on purpose-built sources asserting line-for-line agreement; and a structural check over `e1`–`e3` (both call the file broken, first anchors within two lines, both name the planted fault) because per-line agreement is not attainable across compilers on deliberately broken input (ADR-023/025) |
 | `codemap.test` | five sample files: function lists, innermost `enclosing_function`, verbatim includes, snippet format and clamping, syntax errors, missing files |
 | `agent_mock.test` | full loop on `e1`/`e2` (success, clean compile, patch reports), `e3` unfixed without crashing, trace schema, byte-identical repeat runs, tool dispatch and sandboxing, and an unusable compiler failing in one round |
 | `expected_artifacts.test` | `examples/buggy/expected/` matched against a live mock run, plus the committed demo transcript being timing-free |
-| `cli_contract.test` | the binary's observable behaviour: exit codes, usage errors, a directory rejected instead of "compiling clean", `--outline`, `--no-write` leaving the file byte-identical, `--no-timing` |
+| `cli_contract.test` | the binary's observable behaviour: exit codes, usage errors, a directory rejected instead of "compiling clean", `--outline`, `--no-write` leaving the file byte-identical, `--no-timing`, and `-I`/`-D`/`--flag` reaching the compiler |
 
 The golden cases are generated by [`tools/gen_golden_cases.py`](tools/gen_golden_cases.py)
 into `tests/patch_golden_cases.inc`, which is committed — the C++ suite never
@@ -449,12 +456,15 @@ fixit/
 ├── include/fixit/{compiler,codemap,patch,agent,types}.h
 ├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm}.cpp
 ├── tools/fixit-cli/main.cpp
-├── tools/{gen_golden_cases.py,record_demo.sh,record_compiler_fixtures.sh}
-├── tests/{patch_golden,compiler,codemap,agent_mock}.test.cpp
+├── tools/{gen_golden_cases.py,render_heatmap.py,gcc_sim.py}
+├── tools/{record_demo.sh,gen_expected.sh,fixit_with_my_key.sh}
+├── tests/{patch_golden,compiler,codemap,agent_mock,expected_artifacts,cli_contract}.test.cpp
 ├── tests/fixtures/{compiler,codemap}/
-├── examples/buggy/{e1_missing_include,e2_drift,e3_type_error}.cpp
+├── examples/buggy/{e1_missing_include,e2_drift,e3_type_error,e4_testing}.cpp
 ├── examples/buggy/expected/
-├── docs/{decisions.md,demo_output.txt}
+├── docs/{decisions.md,demo_output.txt,patch_success_matrix.json,wiki_outline.md}
+├── .github/workflows/ci.yml
+├── .secrets/               # git-ignored; API key for a real endpoint
 └── third_party/            # pinned snapshot; FetchContent is the fallback
 ```
 

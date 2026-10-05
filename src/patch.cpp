@@ -297,6 +297,53 @@ double levenshtein_ratio(const std::string& a, const std::string& b) {
   return 1.0 - static_cast<double>(distance) / static_cast<double>(longest);
 }
 
+/// Pairs the lines a hunk quotes on both sides that are byte-identical, in order.
+///
+/// This is the alignment the apply path needs to tell context from content.  A
+/// naive `new_lines[i] == old_lines[i]` only works while the two sides happen to
+/// share an index, which stops being true as soon as the hunk contains a removal
+/// or an addition earlier in the body -- the context lines then get written back
+/// from the diff (losing their own trailing whitespace) instead of being taken
+/// from the file.
+///
+/// Returns pairs of (old index, new index) that form a longest common
+/// subsequence, preferring the diagonal on ties so a straight replacement lines
+/// up rather than reporting its two sides as unrelated.
+std::vector<std::pair<std::size_t, std::size_t>> match_observed_lines(
+    const std::vector<std::string>& old_lines, const std::vector<std::string>& new_lines) {
+  const std::size_t rows = old_lines.size() + 1;
+  const std::size_t cols = new_lines.size() + 1;
+  std::vector<int> table(rows * cols, 0);
+  const auto at = [&](std::size_t i, std::size_t j) -> int& { return table[i * cols + j]; };
+
+  for (std::size_t i = 1; i < rows; ++i) {
+    for (std::size_t j = 1; j < cols; ++j) {
+      if (old_lines[i - 1] == new_lines[j - 1]) {
+        at(i, j) = at(i - 1, j - 1) + 1;
+      } else {
+        at(i, j) = std::max(at(i - 1, j), at(i, j - 1));
+      }
+    }
+  }
+
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  std::size_t i = rows - 1;
+  std::size_t j = cols - 1;
+  while (i > 0 && j > 0) {
+    if (old_lines[i - 1] == new_lines[j - 1]) {
+      pairs.emplace_back(i - 1, j - 1);
+      --i;
+      --j;
+    } else if (at(i - 1, j) >= at(i, j - 1)) {
+      --i;
+    } else {
+      --j;
+    }
+  }
+  std::reverse(pairs.begin(), pairs.end());
+  return pairs;
+}
+
 std::string diff_path_basename(const std::string& header_path) {
   return basename_of(strip_timestamp(trim(header_path)));
 }
@@ -314,7 +361,17 @@ std::vector<DiffFile> PatchEngine::parse_diff(const std::string& unified_diff) {
   for (std::size_t i = 0; i < lines.size(); ++i) {
     const std::string& raw = lines[i];
 
-    if (raw.rfind("+++", 0) == 0 || raw.rfind("---", 0) == 0) {
+    // A file header is the pair `--- old` immediately followed by `+++ new`.  That
+    // is the shape unified diff guarantees, and it is what distinguishes a header
+    // from hunk content: inside a hunk the raw line "+++i;" is the addition `++i;`,
+    // and treating it as a `+++` header ended the hunk early -- which then deleted
+    // the rest of the file while still reporting success.
+    const bool starts_file_header =
+        raw.rfind("---", 0) == 0 && i + 1 < lines.size() && lines[i + 1].rfind("+++", 0) == 0;
+    const bool continues_file_header =
+        raw.rfind("+++", 0) == 0 && i > 0 && lines[i - 1].rfind("---", 0) == 0;
+
+    if (starts_file_header || continues_file_header) {
       const std::string path = diff_path_basename(raw.substr(3));
       hunk = nullptr;
       if (raw.rfind("+++", 0) == 0) {
@@ -410,7 +467,15 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
 
       // 0-based anchor into the *current* line vector, shifted by the net line
       // change of every hunk applied so far.
-      const long raw_anchor = static_cast<long>(hunk.old_start) - 1 + delta;
+      //
+      // The two hunk kinds anchor differently, and this is a standard-format
+      // detail rather than a choice: for a replacement, `@@ -l,c` starts at line
+      // l, so the 0-based anchor is l-1.  For a pure insertion, `@@ -l,0 +m,k @@`
+      // means "insert *after* line l" (GNU diff and patch agree), so the anchor
+      // is l -- keeping "- 1" here put every pure insertion one line too early.
+      const bool pure_insertion = hunk.old_lines.empty();
+      const long anchor_bias = pure_insertion ? 0 : -1;
+      const long raw_anchor = static_cast<long>(hunk.old_start) + anchor_bias + delta;
       const std::size_t anchor = raw_anchor < 0 ? 0 : static_cast<std::size_t>(raw_anchor);
       report.declared_pos = static_cast<int>(anchor) + 1;  // 1-based for humans
 
@@ -419,7 +484,7 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       for (const std::string& l : hunk.old_lines) normalized_signature.push_back(normalize_line(l));
 
       // --- pure insertion -------------------------------------------------
-      if (hunk.old_lines.empty()) {
+      if (pure_insertion) {
         std::size_t pos = anchor;
         if (pos > lines.size()) pos = lines.size();
         std::vector<std::string> spliced(lines.begin(), lines.begin() + static_cast<long>(pos));
@@ -461,71 +526,46 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
         // 0-based element index of the first replaced line.
         const std::size_t pos = static_cast<std::size_t>(outcome.best.pos);
 
-        // A hunk replaces a contiguous run of file lines and produces another.  The
-        // two runs are *not* the same length when the hunk inserts lines, and that
-        // is where a plain old_count splice goes wrong: it consumed old_count file
-        // lines (3) while emitting 4 (context + addition), so the applied file
-        // silently lost the line after the insertion point.
+        // A hunk replaces a contiguous run of file lines and produces another run
+        // that may be longer or shorter.  Two questions must be answered
+        // separately, because conflating them is what corrupted files before:
         //
-        // Separate the two questions:
-        //   how many file lines are consumed -> the lines the hunk quotes as
-        //                                        context or removal, widened to the
-        //                                        declared span when the header says
-        //                                        it replaces more;
-        //   what is written in their place  -> the quoted context (from the file),
-        //                                        the additions, and any widened
-        //                                        context (again from the file).
+        //   how many file lines are consumed -> the number of old-side lines the
+        //     hunk quotes (context plus removals).  Additions quote only the new
+        //     side and replace nothing.  The header's declared count is NOT used to
+        //     widen this: doing so deleted lines the hunk never mentioned, and
+        //     combined with a truncated body it silently emptied files.
+        //   what is written in its place -> the quoted context (taken from the
+        //     file, so untouched code keeps its own bytes), the additions, and the
+        //     replacements.
         const std::size_t quoted_old = hunk.old_lines.size();
         const std::size_t quoted_new = hunk.new_lines.size();
 
-        // The span the hunk quotes.  Never fewer than the lines it quotes; widened
-        // towards old_count when the header declares a larger span (a model that
-        // omitted context still means to replace what it declared).
-        // The number of file lines the hunk *replaces* is simply the number of
-        // old-side lines it quotes: context plus removals.  Additions are extra
-        // output and replace nothing, which is why counting their side instead
-        // (or taking the maximum of the two) consumed one line too many and ate
-        // the line after the insertion point.
         std::size_t consumed = quoted_old;
-
-        // A model that omits context still declares the true span in the header.
-        // Widen towards that only when it is larger -- that is the case the header
-        // exists to rescue -- and only as far as the file allows.
-        if (hunk.old_count > 0) {
-          const std::size_t declared = static_cast<std::size_t>(hunk.old_count);
-          if (declared > consumed) consumed = declared;
-        }
         if (pos >= lines.size()) {
           consumed = 0;
         } else if (pos + consumed > lines.size()) {
           consumed = lines.size() - pos;
         }
 
+        // Which quoted old line corresponds to which quoted new line.
+        const std::vector<std::pair<std::size_t, std::size_t>> aligned =
+            match_observed_lines(hunk.old_lines, hunk.new_lines);
+        const auto context_source_for = [&](std::size_t new_index) -> const std::string* {
+          for (const auto& [old_index, other_new] : aligned) {
+            if (other_new == new_index && old_index < consumed) return &lines[pos + old_index];
+          }
+          return nullptr;
+        };
+
         std::vector<std::string> replacement;
         replacement.reserve(consumed + quoted_new + 1);
-        for (std::size_t i = 0; i < consumed; ++i) {
-          const bool context = i < quoted_old && i < quoted_new &&
-                               hunk.new_lines[i] == hunk.old_lines[i];
-          if (context) {
-            // The file's own bytes: matching ignores trailing whitespace, so a
-            // stripped copy must not reformat code it merely passes through.
-            replacement.push_back(lines[pos + i]);
-          } else if (i < quoted_new) {
-            replacement.push_back(hunk.new_lines[i]);  // an added or replaced line
-          } else if (quoted_new > i) {
-            // Inside the declared span but not quoted by the hunk: re-emit the
-            // file's line rather than invent one.
-            replacement.push_back(lines[pos + i]);
+        for (std::size_t j = 0; j < quoted_new; ++j) {
+          if (const std::string* from_file = context_source_for(j)) {
+            replacement.push_back(*from_file);
+          } else {
+            replacement.push_back(hunk.new_lines[j]);  // a replacement or an addition
           }
-          // Otherwise the hunk quoted fewer new-side lines than it consumes, which
-          // a pure deletion does on purpose (`@@ -2,1 +2,0 @@` with a single '-'
-          // line): the line is removed and nothing is written for it.
-        }
-        // Additions quoted after the consumed span (an insertion at the end of the
-        // quoted context) still have to be written, and they consume no file line.
-        // Only look at new-side lines the first loop did not already emit.
-        for (std::size_t i = std::min(consumed, quoted_new); i < quoted_new; ++i) {
-          replacement.push_back(hunk.new_lines[i]);
         }
 
         std::vector<std::string> spliced(lines.begin(), lines.begin() + static_cast<long>(pos));

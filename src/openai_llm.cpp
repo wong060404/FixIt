@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -73,8 +74,12 @@ nlohmann::json messages_to_json(const std::vector<Message>& messages) {
   for (const Message& message : messages) {
     nlohmann::json entry = {{"role", message.role}};
     if (message.role == "tool") {
-      // OpenAI-compatible servers expect tool results as plain content.
+      // OpenAI-compatible servers expect tool results as plain content, tagged
+      // with the id of the call they answer.
       entry["content"] = message.content;
+      if (message.tool_result.is_object() && message.tool_result.contains("tool_call_id")) {
+        entry["tool_call_id"] = message.tool_result["tool_call_id"];
+      }
     } else if (!message.content.empty()) {
       entry["content"] = message.content;
     } else {
@@ -137,8 +142,10 @@ LlmResponse OpenAiLlm::chat(const std::vector<Message>& messages,
       nlohmann::json error = nlohmann::json::parse(result->body, nullptr, false);
       if (!error.is_discarded() && error.contains("error")) {
         const nlohmann::json& e = error["error"];
-        if (e.is_object() && e.contains("message")) {
+        if (e.is_object() && e.contains("message") && e["message"].is_string()) {
           std::cerr << "fixit: " << e["message"].get<std::string>() << "\n";
+        } else if (e.is_string()) {
+          std::cerr << "fixit: " << e.get<std::string>() << "\n";
         }
       }
       return false;
@@ -225,25 +232,63 @@ LlmResponse OpenAiLlm::chat(const std::vector<Message>& messages,
     return response;
   }
 
-  const nlohmann::json& message = parsed["choices"][0].value("message", nlohmann::json::object());
-  response.content = message.value("content", std::string());
+  // Everything below reads fields off server-controlled JSON, so each step is
+  // type-checked: a `choices: [1]` or a non-string `content` used to throw an
+  // nlohmann type_error that nothing caught, terminating the process (and, worse,
+  // possibly mid-repair with the file already written).
+  if (!parsed["choices"][0].is_object()) {
+    std::cerr << "fixit: LLM response had a malformed choice\n";
+    response.is_final = true;
+    return response;
+  }
+  const nlohmann::json message =
+      parsed["choices"][0].value("message", nlohmann::json::object());
+  if (!message.is_object()) {
+    std::cerr << "fixit: LLM response had a malformed message\n";
+    response.is_final = true;
+    return response;
+  }
+  if (message.contains("content") && message["content"].is_string()) {
+    response.content = message["content"].get<std::string>();
+  }
 
   if (message.contains("tool_calls") && message["tool_calls"].is_array()) {
     for (const auto& call : message["tool_calls"]) {
+      if (!call.is_object()) continue;
+      const nlohmann::json function = call.value("function", nlohmann::json::object());
+      if (!function.is_object()) continue;
       ToolCall tool_call;
-      const nlohmann::json& function = call.value("function", nlohmann::json::object());
-      tool_call.name = function.value("name", std::string());
-      const std::string arguments = function.value("arguments", std::string("{}"));
+      if (function.contains("name") && function["name"].is_string()) {
+        tool_call.name = function["name"].get<std::string>();
+      }
+      std::string arguments = "{}";
+      if (function.contains("arguments") && function["arguments"].is_string()) {
+        arguments = function["arguments"].get<std::string>();
+      }
       tool_call.args = nlohmann::json::parse(arguments, nullptr, false);
       if (tool_call.args.is_discarded()) tool_call.args = nlohmann::json::object();
       if (!tool_call.name.empty()) response.tool_calls.push_back(std::move(tool_call));
     }
   }
 
-  // A plain text answer that says FINAL is treated as the model being done.
-  if (response.tool_calls.empty() &&
-      response.content.find("FINAL") != std::string::npos) {
-    response.is_final = true;
+  // A plain text answer is a completion claim only when the whole answer is the
+  // marker.  A substring test ended the loop on "NOT FINAL" or "FINAL RESULT",
+  // i.e. on the model saying it was *not* finished.
+  if (response.tool_calls.empty()) {
+    std::string trimmed = response.content;
+    while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r' ||
+                                trimmed.back() == ' ' || trimmed.back() == '.')) {
+      trimmed.pop_back();
+    }
+    while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\n')) {
+      trimmed.erase(trimmed.begin());
+    }
+    std::string upper;
+    upper.reserve(trimmed.size());
+    for (const char c : trimmed) {
+      upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    response.is_final = (upper == "FINAL");
   }
   return response;
 }

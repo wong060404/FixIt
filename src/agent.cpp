@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstddef>
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -24,11 +25,32 @@ std::string basename_only(const std::string& path) {
 }
 
 /// Resolves `path` against `workdir` and refuses to escape it.
+///
+/// An absolute path is rejected outright, and the resolved result is
+/// canonicalised and required to sit inside the canonical workdir.  The earlier
+/// check only looked for the substring "/../", which let an absolute path
+/// through untouched (`/etc/passwd` needs no "..") and missed a bare ".." as
+/// well.  The reader's output goes into the prompt sent to a remote model and the
+/// patch tool writes through the same resolver, so escaping the workdir is both
+/// an information leak and a write primitive.
 bool resolve_in_workdir(const std::string& workdir, const std::string& path, std::string& out) {
   if (path.empty()) return false;
-  const std::string joined = (path.front() == '/') ? path : workdir + "/" + path;
-  if (joined.find("/../") != std::string::npos) return false;
-  out = joined;
+  if (path.front() == '/') return false;  // absolute paths are outside the sandbox
+  if (workdir.empty()) return false;
+
+  std::error_code ec;
+  const std::filesystem::path root = std::filesystem::weakly_canonical(workdir, ec);
+  if (ec) return false;
+  const std::filesystem::path candidate = std::filesystem::weakly_canonical(root / path, ec);
+  if (ec) return false;
+
+  // Require `candidate` to be `root` itself or lie under it.  Comparing path
+  // components (not string prefixes) keeps `/work` from matching `/workshop`.
+  const std::filesystem::path relative = candidate.lexically_relative(root);
+  if (relative.empty() && candidate != root) return false;
+  if (!relative.empty() && *relative.begin() == "..") return false;
+
+  out = candidate.string();
   return true;
 }
 
@@ -195,7 +217,12 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  const std::string content = slurp(resolved, ok);
                  if (!ok) return nlohmann::json{{"error", "cannot read " + file}};
 
-                 const auto total = static_cast<int>(std::count(content.begin(), content.end(), '\n'));
+                 // Count physical lines, not newline bytes: a file without a
+                 // trailing newline has one more line than it has '\n', and
+                 // counting newlines alone clamped `end` below the real last line.
+                 int total = static_cast<int>(std::count(content.begin(), content.end(), '\n'));
+                 if (!content.empty() && content.back() != '\n') ++total;
+
                  int start = int_arg(args, "start", 1);
                  int end = int_arg(args, "end", total);
                  start = std::max(1, start);
@@ -205,9 +232,18 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  std::ostringstream out;
                  std::string line;
                  int number = 0;
-                 while (std::getline(in, line) && number <= end) {
+                 int emitted = 0;
+                 // `start` and `end` are inclusive 1-based line numbers, as the
+                 // tool's description tells the model.  Counting emitted lines (not
+                 // comparing the line number) is what makes this exact at the end of
+                 // a file: std::getline yields a final empty line when the file ends
+                 // with a newline, and a `number <= end` test printed that as an
+                 // extra line.
+                 const int wanted = end - start + 1;
+                 while (std::getline(in, line) && emitted < wanted) {
                    ++number;
                    if (number < start) continue;
+                   ++emitted;
                    std::ostringstream formatted;
                    formatted.width(4);
                    formatted << number;
@@ -221,9 +257,18 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  // syntax error.  A model uses it to aim its patches, and it is
                  // returned by default because it is small and almost always
                  // useful.
-                 const bool want_outline = args.is_object() && args.contains("outline")
-                                               ? args["outline"].get<bool>()
-                                               : true;
+                 // Tolerate a stringly-typed argument: a model that sends
+                 // "outline":"false" must not turn the whole read into an error.
+                 bool want_outline = true;
+                 if (args.is_object() && args.contains("outline")) {
+                   const nlohmann::json& flag = args["outline"];
+                   if (flag.is_boolean()) {
+                     want_outline = flag.get<bool>();
+                   } else if (flag.is_string()) {
+                     const std::string text = flag.get<std::string>();
+                     want_outline = !(text == "false" || text == "0" || text == "no");
+                   }
+                 }
                  if (want_outline) {
                    const CodeMap map(resolved);
                    nlohmann::json functions = nlohmann::json::array();
@@ -412,9 +457,26 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
       break;
     }
 
+    // The model's own turn has to go into the conversation before its results.
+    // Without it every `role: "tool"` message answers nothing, which strict
+    // OpenAI-compatible servers reject with a 400 -- and the model could not see
+    // what it asked for on the previous round.  Each call gets an id so the tool
+    // results can reference it.
+    nlohmann::json assistant_calls = nlohmann::json::array();
+    for (std::size_t index = 0; index < response.tool_calls.size(); ++index) {
+      const ToolCall& call = response.tool_calls[index];
+      assistant_calls.push_back(nlohmann::json{
+          {"id", "call_" + std::to_string(round) + "_" + std::to_string(index)},
+          {"type", "function"},
+          {"function", nlohmann::json{{"name", call.name}, {"arguments", call.args.dump()}}}});
+    }
+    messages.push_back(
+        Message{"assistant", response.content, assistant_calls, nlohmann::json()});
+
     // Execute the requested tools and append their raw results as observations.
     nlohmann::json observations = nlohmann::json::array();
-    for (const ToolCall& call : response.tool_calls) {
+    for (std::size_t index = 0; index < response.tool_calls.size(); ++index) {
+      const ToolCall& call = response.tool_calls[index];
       const nlohmann::json observation = tools_.call(call.name, call.args);
 
       if (call.name == "patch" && observation.is_object() && observation.contains("reports")) {
@@ -440,7 +502,10 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
         for (const ToolSpec& spec : specs) entry["available_tools"].push_back(spec.name);
       }
       observations.push_back(std::move(entry));
-      messages.push_back(Message{"tool", observation.dump(2), nlohmann::json::array(), observation});
+      Message tool_message{"tool", observation.dump(2), nlohmann::json::array(), observation};
+      tool_message.tool_result = nlohmann::json{
+          {"tool_call_id", "call_" + std::to_string(round) + "_" + std::to_string(index)}};
+      messages.push_back(std::move(tool_message));
     }
     round_entry["observations"] = std::move(observations);
     trace.push_back(std::move(round_entry));

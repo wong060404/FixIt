@@ -293,8 +293,11 @@ TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][to
     const nlohmann::json result =
         registry.call("read", nlohmann::json{{"file", "tool_target.cpp"}, {"start", 2}, {"end", 3}});
     REQUIRE(result.contains("content"));
+    // Inclusive line numbers: 2..3 is two lines.  The expectation used to include
+    // line 4, which was the result of testing the line number instead of how many
+    // lines had been emitted.
     CHECK(result["content"].get<std::string>() ==
-          "   2 | int alpha(int value) {\n   3 |   return value + 1;\n   4 | }\n");
+          "   2 | int alpha(int value) {\n   3 |   return value + 1;\n");
 
     // The outline comes from CodeMap: functions with their ranges and includes.
     REQUIRE(result.contains("outline"));
@@ -330,6 +333,68 @@ TEST_CASE("tool registry exposes and dispatches the standard tools", "[agent][to
     CHECK(registry.call("nope", nlohmann::json::object()).contains("error"));
     CHECK(registry.call("read", nlohmann::json{{"file", "missing.cpp"}}).contains("error"));
     CHECK(registry.call("read", nlohmann::json{{"file", "../escape.cpp"}}).contains("error"));
+  }
+
+  SECTION("the tool sandbox refuses every route out of the workdir") {
+    // A secret outside the workdir must be unreadable whatever spelling is used:
+    // the reader's output is forwarded to a remote model, so this is a data-leak
+    // boundary, and `patch` writes through the same resolver.
+    const fs::path outside = scratch.path().parent_path() / "outside.txt";
+    write_file(outside, "TOP SECRET\n");
+
+    const std::vector<std::string> escapes = {
+        "../outside.txt",
+        "..",
+        "../../etc/hosts",
+        outside.string(),                       // absolute path
+        "subdir/../../outside.txt",             // traversal after a normal name
+    };
+    for (const std::string& route : escapes) {
+      INFO("route: " << route);
+      const nlohmann::json answer = registry.call("read", nlohmann::json{{"file", route}});
+      CHECK(answer.contains("error"));
+      CHECK(answer.dump().find("TOP SECRET") == std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("the read tool reports the lines it actually returned", "[agent][tools]") {
+  Scratch scratch("read-lines");
+  fixit::ToolRegistry registry = fixit::make_standard_tools(scratch.path().string());
+
+  SECTION("a file without a trailing newline still has all its lines") {
+    // Counting '\n' alone makes the last line disappear, so `end` was reported one
+    // short and the loop's `<=` then read one line past the request.
+    write_file(scratch.path() / "four.cpp", "L1\nL2\nL3\nL4");
+    const nlohmann::json all =
+        registry.call("read", nlohmann::json{{"file", "four.cpp"}, {"start", 1}, {"end", 4}});
+    CHECK(all.value("end", -1) == 4);
+    const std::string body = all.value("content", std::string());
+    CHECK(std::count(body.begin(), body.end(), '\n') == 4);
+    CHECK(body.find("L4") != std::string::npos);
+  }
+
+  SECTION("start and end are inclusive, and end is not clamped short") {
+    // The tool's contract is inclusive on both ends (see the dispatch test above),
+    // so read 2..3 is two lines -- and on a file with no trailing newline that
+    // range must still be reachable, which is what the count fix restores.
+    write_file(scratch.path() / "four.cpp", "L1\nL2\nL3\nL4");
+    const nlohmann::json middle =
+        registry.call("read", nlohmann::json{{"file", "four.cpp"}, {"start", 2}, {"end", 3}});
+    CHECK(middle.value("end", -1) == 3);
+    const std::string body = middle.value("content", std::string());
+    CHECK(std::count(body.begin(), body.end(), '\n') == 2);
+    CHECK(body.find("L2") != std::string::npos);
+    CHECK(body.find("L3") != std::string::npos);
+    CHECK(body.find("L4") == std::string::npos);
+  }
+
+  SECTION("a stringly-typed outline flag does not fail the read") {
+    write_file(scratch.path() / "four.cpp", "L1\nL2\n");
+    const nlohmann::json answer = registry.call(
+        "read", nlohmann::json{{"file", "four.cpp"}, {"start", 1}, {"end", 1}, {"outline", "false"}});
+    CHECK_FALSE(answer.contains("error"));
+    CHECK_FALSE(answer.contains("outline"));
   }
 }
 

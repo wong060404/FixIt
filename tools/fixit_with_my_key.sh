@@ -39,12 +39,12 @@ if [[ -z "${KEY}" ]]; then
   exit 2
 fi
 
-# The key is passed through the environment, never in argv, and is unset before
-# the child runs so nothing it spawns (including any trace) can see it.
+# The key travels in the environment only.  It is never placed in argv (where
+# `ps` would show it and where the kernel records it for the process lifetime),
+# and FIXIT_API_KEY is what the CLI reads when --api-key is absent.
 export FIXIT_API_KEY="${KEY}"
 unset KEY
 export FIXIT_CA_BUNDLE="${CA_BUNDLE}"
 
 exec "${BIN}" "$1" --agent --llm openai \
-  --base-url "${BASE_URL}" --model "${MODEL}" \
-  --api-key "${FIXIT_API_KEY}" "${@:2}"
+  --base-url "${BASE_URL}" --model "${MODEL}" "${@:2}"

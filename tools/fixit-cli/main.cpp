@@ -512,7 +512,8 @@ int main(int argc, char** argv) {
     // Patch event
     std::cout << "  " << yellow("→ patch…") << "\n";
     for (const fixit::HunkReport& report : event.patch.reports) {
-      classify(report, metrics);
+      // No counting here: `result.patches` below is the single source of truth.
+      // Counting in both places doubled every metric whenever --verbose was on.
       if (report.status == fixit::HunkReport::Status::Applied) {
         std::cout << "    " << green("✓ hunk " + std::to_string(report.hunk_index) + " @ L" +
                                      std::to_string(report.matched_pos))

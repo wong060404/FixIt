@@ -3,8 +3,8 @@
 // proves the sliding-window search works.
 
 #include <string>
-
 #include <vector>
+
 static int helper_1(int value) { return value + 1; }
 static int helper_2(int value) { return value + 2; }
 static int helper_3(int value) { return value + 3; }

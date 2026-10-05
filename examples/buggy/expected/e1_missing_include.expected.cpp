@@ -5,8 +5,8 @@
 // order, and the missing ';' masks the header error on clang's first pass --
 // which is exactly the situation the repair loop exists for.
 #include <string>
-
 #include <vector>
+
 int parse_count(const std::string& text) {
   int n = 3;
   return n;
