@@ -51,6 +51,16 @@ cd FixIt
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure
 ```
 
+> **Windows:** nothing has to be installed system-wide. A portable MinGW-w64 GCC is
+> fetched by `python tools\windows\fetch_mingw.py`, and
+> `tools\windows\build_fixit.ps1` builds the same two binaries without CMake (the
+> CMake generators cannot be used here — see the script header for why). Follow
+> [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) for a step-by-step guide, in Chinese, that
+> starts from a bare Windows machine. Two helper scripts cover the model backends:
+> `tools\windows\llm-relay.py` reaches https endpoints from this TLS-less build,
+> and `tools\windows\probe-endpoint.py` checks an endpoint, key and model before a
+> run.
+
 Then run the section-0 acceptance command:
 
 ```bash

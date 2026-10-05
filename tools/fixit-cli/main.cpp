@@ -14,7 +14,20 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+// The POSIX spellings are not declared by the UCRT under -std=c++20; the
+// underscore-prefixed equivalents are the same functions.
+#include <io.h>
+#include <process.h>
+#define fixit_getpid ::_getpid
+#define fixit_isatty ::_isatty
+#define fixit_fileno ::_fileno
+#else
 #include <unistd.h>
+#define fixit_getpid ::getpid
+#define fixit_isatty ::isatty
+#define fixit_fileno ::fileno
+#endif
 
 #include "fixit/agent.h"
 #include "fixit/codemap.h"
@@ -296,7 +309,7 @@ int main(int argc, char** argv) {
 
     if (const char* no_colour = std::getenv("NO_COLOR"); no_colour != nullptr && *no_colour != '\0') {
       g_colour = false;
-    } else if (::isatty(fileno(stdout)) == 0) {
+    } else if (fixit_isatty(fixit_fileno(stdout)) == 0) {
       g_colour = false;
     }
 
@@ -352,7 +365,7 @@ int main(int argc, char** argv) {
       std::error_code error;
       const std::filesystem::path scratch =
           std::filesystem::temp_directory_path(error) /
-          ("fixit-no-write-" + std::to_string(::getpid()));
+          ("fixit-no-write-" + std::to_string(fixit_getpid()));
       std::filesystem::create_directories(scratch, error);
       std::filesystem::copy_file(options.file, scratch / basename_of(options.file),
                                  std::filesystem::copy_options::overwrite_existing, error);

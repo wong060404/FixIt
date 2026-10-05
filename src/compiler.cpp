@@ -16,11 +16,28 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+// Windows port: the original implementation relied on fork/exec plus a polled
+// pipe.  CreateProcess with an inheritable pipe and a deadline is the direct
+// equivalent, and the observable behaviour (merged stdout+stderr, a timeout that
+// kills the child and keeps what was captured so far) is the same.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <process.h>
+#include <cwctype>
+#else
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#include <filesystem>
+#include <fstream>
 
 #include <nlohmann/json.hpp>
 
@@ -119,8 +136,11 @@ std::string format_context_line(int line_no, const std::string& text) {
 // GCC / plain-text diagnostics
 // ---------------------------------------------------------------------------
 std::vector<Diagnostic> parse_gcc(const std::string& raw_output) {
+  // The file part has to accept a Windows drive-letter path (`C:\src\a.cpp`):
+  // `[^:]+` cannot, because the drive separator is itself a colon, and every
+  // diagnostic from an absolute path would silently parse as zero errors.
   static const std::regex diag_re(
-      R"(^([^:]+):(\d+):(\d+):\s+(error|warning|fatal error|note):\s+(.*)$)");
+      R"(^([A-Za-z]:[\\/][^:]*|[^:]+):(\d+):(\d+):\s+(error|warning|fatal error|note):\s+(.*)$)");
 
   std::vector<std::string> lines;
   {
@@ -290,7 +310,8 @@ struct CapturedProcess {
   std::string output;
 };
 
-CapturedProcess run_capture(const std::vector<std::string>& argv, int timeout_seconds) {
+#ifndef _WIN32
+CapturedProcess run_capture_posix(const std::vector<std::string>& argv, int timeout_seconds) {
   CapturedProcess result;
 
   int pipefd[2];
@@ -377,6 +398,158 @@ CapturedProcess run_capture(const std::vector<std::string>& argv, int timeout_se
   if (result.timed_out) result.exit_code = -1;
   return result;
 }
+#endif  // !_WIN32
+
+#ifdef _WIN32
+/// Command lines and paths travel as UTF-8 inside fixit, but Windows needs
+/// UTF-16: the narrow `...A` APIs would mangle a non-ASCII workspace path.
+std::wstring utf8_to_wide(const std::string& text) {
+  if (text.empty()) return std::wstring();
+  const int length = static_cast<int>(text.size());
+  const int needed = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), length, nullptr, 0);
+  if (needed <= 0) return std::wstring();
+  std::wstring wide(static_cast<std::size_t>(needed), L'\0');
+  ::MultiByteToWideChar(CP_UTF8, 0, text.data(), length, wide.data(), needed);
+  return wide;
+}
+
+/// Quotes one argument for the CreateProcess command line, applying the
+/// backslash/quote rules the C runtime parser expects.
+std::wstring quote_windows_arg(const std::wstring& arg) {
+  if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) return arg;
+  std::wstring out = L"\"";
+  for (auto it = arg.begin();;) {
+    std::size_t backslashes = 0;
+    while (it != arg.end() && *it == L'\\') {
+      ++it;
+      ++backslashes;
+    }
+    if (it == arg.end()) {
+      out.append(backslashes * 2, L'\\');
+      break;
+    }
+    if (*it == L'"') {
+      out.append(backslashes * 2 + 1, L'\\');
+      out.push_back(L'"');
+    } else {
+      out.append(backslashes, L'\\');
+      out.push_back(*it);
+    }
+    ++it;
+  }
+  out.push_back(L'"');
+  return out;
+}
+
+/// CreateProcess cannot start a batch script itself, so `.bat`/`.cmd` wrappers
+/// (a common way to point `--compiler` at a toolchain shim) go through cmd.exe.
+bool is_batch_script(const std::wstring& command) {
+  if (command.size() < 4) return false;
+  std::wstring tail = command.substr(command.size() - 4);
+  std::transform(tail.begin(), tail.end(), tail.begin(),
+                 [](wchar_t c) { return static_cast<wchar_t>(::towlower(c)); });
+  return tail == L".bat" || tail == L".cmd";
+}
+
+/// Reads everything currently buffered in the pipe; `false` means it is closed.
+bool drain_pipe(HANDLE pipe, std::string& out, std::array<char, 8192>& buf) {
+  for (;;) {
+    DWORD available = 0;
+    if (!::PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) return false;
+    if (available == 0) return true;
+    DWORD got = 0;
+    if (!::ReadFile(pipe, buf.data(), static_cast<DWORD>(buf.size()), &got, nullptr) || got == 0) {
+      return false;
+    }
+    out.append(buf.data(), got);
+  }
+}
+
+CapturedProcess run_capture_windows(const std::vector<std::string>& argv, int timeout_seconds) {
+  CapturedProcess result;
+  if (argv.empty()) {
+    result.output = "fixit: empty command\n";
+    return result;
+  }
+
+  SECURITY_ATTRIBUTES attributes{};
+  attributes.nLength = sizeof(attributes);
+  attributes.bInheritHandle = TRUE;
+  attributes.lpSecurityDescriptor = nullptr;
+
+  HANDLE read_end = nullptr;
+  HANDLE write_end = nullptr;
+  if (!::CreatePipe(&read_end, &write_end, &attributes, 0)) {
+    result.output = "fixit: CreatePipe() failed: " + std::to_string(::GetLastError());
+    return result;
+  }
+  ::SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
+
+  const std::wstring program = utf8_to_wide(argv.front());
+  std::wstring command_line;
+  if (is_batch_script(program)) command_line = L"cmd.exe /c ";
+  for (std::size_t i = 0; i < argv.size(); ++i) {
+    if (i != 0) command_line.push_back(L' ');
+    command_line += quote_windows_arg(utf8_to_wide(argv[i]));
+  }
+
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdInput = ::GetStdHandle(STD_INPUT_HANDLE);
+  startup.hStdOutput = write_end;
+  startup.hStdError = write_end;
+
+  PROCESS_INFORMATION info{};
+  std::vector<wchar_t> mutable_line(command_line.begin(), command_line.end());
+  mutable_line.push_back(L'\0');
+  const BOOL started = ::CreateProcessW(nullptr, mutable_line.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info);
+  ::CloseHandle(write_end);
+  if (!started) {
+    ::CloseHandle(read_end);
+    result.output = "fixit: cannot execute '" + argv.front() + "': error " +
+                    std::to_string(::GetLastError()) + "\n";
+    result.exit_code = 127;
+    return result;
+  }
+  ::CloseHandle(info.hThread);
+
+  const ULONGLONG budget = static_cast<ULONGLONG>(timeout_seconds > 0 ? timeout_seconds : 0) * 1000ULL;
+  const ULONGLONG deadline = ::GetTickCount64() + budget;
+  std::array<char, 8192> buf{};
+  for (;;) {
+    if (!drain_pipe(read_end, result.output, buf)) break;  // child closed the pipe
+    if (::WaitForSingleObject(info.hProcess, 0) == WAIT_OBJECT_0) {
+      drain_pipe(read_end, result.output, buf);
+      break;
+    }
+    if (::GetTickCount64() >= deadline) {
+      result.timed_out = true;
+      ::TerminateProcess(info.hProcess, 1);
+      ::WaitForSingleObject(info.hProcess, 5000);
+      drain_pipe(read_end, result.output, buf);
+      break;
+    }
+    ::Sleep(5);
+  }
+
+  DWORD exit_code = 0;
+  if (::GetExitCodeProcess(info.hProcess, &exit_code)) result.exit_code = static_cast<int>(exit_code);
+  if (result.timed_out) result.exit_code = -1;
+  ::CloseHandle(info.hProcess);
+  ::CloseHandle(read_end);
+  return result;
+}
+#endif  // _WIN32
+
+CapturedProcess run_capture(const std::vector<std::string>& argv, int timeout_seconds) {
+#ifdef _WIN32
+  return run_capture_windows(argv, timeout_seconds);
+#else
+  return run_capture_posix(argv, timeout_seconds);
+#endif
+}
 
 }  // namespace
 
@@ -393,6 +566,28 @@ namespace {
 class TempFile {
  public:
   explicit TempFile(const std::string& contents) {
+#ifdef _WIN32
+    // mkstemp has no Windows equivalent and "/tmp" does not exist; the probe
+    // only needs a writable scratch file next to the compiler's temp area.
+    std::error_code error;
+    const std::filesystem::path dir = std::filesystem::temp_directory_path(error);
+    if (error) {
+      path_.clear();
+      return;
+    }
+    for (int attempt = 0; attempt < 64; ++attempt) {
+      const std::filesystem::path candidate =
+          dir / ("fixit-probe-" + std::to_string(::_getpid()) + "-" + std::to_string(attempt) + ".cpp");
+      std::ofstream out(candidate, std::ios::binary | std::ios::trunc);
+      if (!out) continue;
+      out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+      out.close();
+      if (!out) continue;
+      path_ = candidate.string();
+      return;
+    }
+    path_.clear();
+#else
     char tmpl[] = "/tmp/fixit-probe-XXXXXX";
     const int fd = ::mkstemp(tmpl);
     if (fd < 0) {
@@ -403,9 +598,17 @@ class TempFile {
     ssize_t ignored = ::write(fd, contents.data(), contents.size());
     (void)ignored;
     ::close(fd);
+#endif
   }
   ~TempFile() {
+#ifndef _WIN32
     if (!path_.empty()) ::unlink(path_.c_str());
+#else
+    if (!path_.empty()) {
+      std::error_code error;
+      std::filesystem::remove(path_, error);
+    }
+#endif
   }
   TempFile(const TempFile&) = delete;
   TempFile& operator=(const TempFile&) = delete;
@@ -432,9 +635,16 @@ DiagnosticFlags probe_diagnostic_flags(const std::string& compiler, int timeout_
   static std::mutex cache_mutex;
   static std::vector<CacheEntry> cache;
   const auto mtime_of = [](const std::string& path) -> std::int64_t {
+#ifdef _WIN32
+    std::error_code error;
+    const std::filesystem::file_time_type stamp = std::filesystem::last_write_time(path, error);
+    if (error) return 0;
+    return static_cast<std::int64_t>(stamp.time_since_epoch().count());
+#else
     struct stat info {};
     if (::stat(path.c_str(), &info) != 0) return 0;
     return static_cast<std::int64_t>(info.st_mtime);
+#endif
   };
   const CacheEntry key_entry{compiler, mtime_of(compiler), {}};
   {
