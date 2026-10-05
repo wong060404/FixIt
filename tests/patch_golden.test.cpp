@@ -321,3 +321,44 @@ TEST_CASE("an ambiguous hunk is refused rather than silently misplaced",
     CHECK(line == report.matched_pos);
   }
 }
+
+// ---------------------------------------------------------------------------
+// KNOWN DEFECT (documented, skipped): a hunk that inserts context lines
+// silently deletes the file line after the insertion point.
+//
+// Found by driving the engine with a real model (GPT-class backend via an
+// OpenAI-compatible endpoint) rather than by the golden corpus, which is why it
+// is recorded here explicitly.  The engine consumes `old_count` file lines while
+// emitting `context + additions` new lines; when a hunk both quotes context and
+// adds a line those counts differ, and the splice resumes one line too late.
+//
+// Reproduce by removing the SKIP below:
+//
+//   file     L1..L11
+//   hunk     @@ -7,3 +7,4 @@   with quotes L7, +INSERTED, L8, L9
+//   observed L7, INSERTED, L8, L10   <- L9 gone
+//   expected L7, INSERTED, L8, L9, L10
+//
+// The fix has to reconcile the header's declared count with the number of lines
+// the hunk actually quotes, which is a deeper change to the apply path than a
+// bounds tweak: two attempts were reverted because they broke the 60-case golden
+// corpus.  Left as a tracked defect with a reproduction rather than an
+// unverified rewrite.
+// ---------------------------------------------------------------------------
+TEST_CASE("an insertion hunk must not consume the following line",
+          "[patch][known-defect][!mayfail]") {
+  const std::string content = "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\n";
+  const std::string diff =
+      "--- a/x.cpp\n+++ b/x.cpp\n@@ -7,3 +7,4 @@\n"
+      " L7\n"
+      "+INSERTED\n"
+      " L8\n"
+      " L9\n";
+  const fixit::PatchEngine engine;
+  const fixit::PatchResult result = engine.apply(content, diff, "x.cpp");
+
+  INFO("new content:\n" << result.new_content);
+  // The line after the insertion point must still be there.
+  CHECK(result.new_content.find("L8\nL9\n") != std::string::npos);
+  CHECK(result.new_content.find("INSERTED\n") != std::string::npos);
+}

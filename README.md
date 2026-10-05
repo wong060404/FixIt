@@ -328,6 +328,21 @@ wall-clock reports so output can be diffed between runs — that is how
 stdout is not a TTY or `NO_COLOR` is set, which keeps `docs/demo_output.txt`
 diffable.
 
+## 6.6 Known defect (open)
+
+A hunk that **inserts** lines while quoting surrounding context can drop the line
+after the insertion point.  The apply path consumes `old_count` file lines while
+emitting `context + additions` new lines, and those differ by the number of added
+lines.  Found by driving the engine with a real model; the golden corpus does not
+combine quoted context with an inserted line in that shape.
+
+* Reproduced by a test tagged `[!mayfail]` in `tests/patch_golden.test.cpp`, so it
+  fails visibly without turning CI red.
+* Replacements are unaffected: missing semicolons, typos and wrong types all
+  apply correctly.
+* Until it is fixed, use `--no-write` and inspect the result before writing back.
+* Recorded as ADR-028 with the exact input, observed output and expected output.
+
 ## 7. Testing
 
 ```bash

@@ -635,3 +635,51 @@ user with a key actually use it.
 wrapper `tools/fixit_with_my_key.sh` reads the value and then unsets it before
 exec'ing the CLI, so the key is not in `argv` and cannot reach a trace or metrics
 file; a test asserts a planted key appears in neither.
+
+---
+
+## ADR-028 — A tracked defect: insertion hunks can drop the following line
+
+**Context.** Driving the engine with a real model (through an
+OpenAI-compatible endpoint) produced a hunk shaped like
+
+```
+@@ -7,3 +7,4 @@
+ #include <string>
++#include <vector>
+ 
+ int main() {
+```
+
+and the applied result deleted the line after the insertion point.  The cause is
+in the apply path: it consumes `old_count` file lines while emitting
+`context + additions` new lines.  When a hunk both quotes context and adds a line
+those counts differ by the number of additions, so the splice resumes one line
+too late.
+
+This was **not** found by the golden corpus.  Every golden case inserts a line
+*without* quoting trailing context around it, or replaces rather than inserts, so
+none of them combine "quoted context" with "an added line" in the way a real model
+does.
+
+**Decision.** Record it rather than ship a third speculative fix.  Two attempts
+were reverted: the first segfaulted the suite, the second kept the 60-case golden
+corpus green but broke it in other places, because reconciling the header's
+declared count with the number of lines a hunk actually quotes changes the
+replacement-span calculation for *every* hunk.  The defect is now:
+
+* reproduced by a test tagged `[!mayfail]`, so it fails visibly but cannot turn
+  CI red;
+* documented with its exact input, observed output and expected output;
+* listed as an open item in the README.
+
+A related gap was fixed in the same pass: a diff that parses to zero hunks used to
+return an empty report with no explanation, which is the failure a real model hits
+most often (its `@@` header does not match the expected shape).  The `patch` tool
+now returns the reason plus the first 600 bytes of the received diff, and the
+model corrected its format on the next round when this was tested live.
+
+**Consequence for users.** Semicolon/typo/type repairs — replacements — are
+unaffected.  A repair whose patch *adds* lines while quoting surrounding context
+can lose the line after the insertion; use `--no-write` and inspect the diff until
+this is fixed.

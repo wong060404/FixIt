@@ -258,6 +258,30 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
 
                  const PatchEngine engine;
                  const PatchResult result = engine.apply(content, diff, basename_only(file));
+
+                 // A diff that parses to nothing is the one failure the engine
+                 // cannot describe (there is no hunk to report on), and it is the
+                 // failure a real model hits most often: it sends a diff whose
+                 // headers the parser does not recognise.  Say so explicitly and
+                 // quote what arrived, so the model can correct its format instead
+                 // of retrying the same shape.
+                 if (result.reports.empty()) {
+                   std::string echo = diff.size() > 600 ? diff.substr(0, 600) + "…" : diff;
+                   return nlohmann::json{
+                       {"all_applied", false},
+                       {"reports", nlohmann::json::array()},
+                       {"error", "the diff produced no hunks: no line matched the unified-diff "
+                                 "header pattern. Expected lines like `--- a/file`, `+++ b/file` "
+                                 "and `@@ -<line>,<count> +<line>,<count> @@`, followed by "
+                                 "context lines prefixed with a space, `-` for removed and `+` "
+                                 "for added lines."},
+                       {"received_diff", echo},
+                       {"failure_summary",
+                        "Patch failed for " + basename_only(file) +
+                            ": the diff contained no recognisable hunk.\n"
+                            "  Expected: --- a/file / +++ b/file / @@ -N,M +N,M @@ then ' ', '-' "
+                            "and '+' lines.\n  Received (first 600 bytes):\n" + echo + "\n"}};
+                 }
                  if (result.all_applied) {
                    std::ofstream out(resolved, std::ios::binary | std::ios::trunc);
                    if (!out) return nlohmann::json{{"error", "cannot write " + file}};
