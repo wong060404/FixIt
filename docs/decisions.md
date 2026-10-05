@@ -696,3 +696,29 @@ eagerly" case, and a bounds read when the new side quotes nothing.
 The lesson recorded for the test corpus: all 60 generated cases replaced lines, so
 none of them combined quoted context with an inserted line.  The regression test
 for that shape now exists.
+
+---
+
+## ADR-029 — Compiler flags are pass-through, not guessed
+
+**Context.** `CompilerConfig` always had an `extra_flags` field, but the CLI never
+populated it.  Any file that included a project header therefore failed with
+`'math_utils.h' file not found` before FixIt could see a real diagnostic, which
+made the tool unusable on anything but self-contained files.
+
+**Decision.** Add `-I DIR` / `--include DIR`, `-D NAME[=VALUE]` and a general
+`--flag FLAG`, all repeatable, all forwarded verbatim; the joined `-Iinclude` form
+is accepted.  The echoed command line includes the flags so the user can see
+exactly what ran.
+
+**Alternatives rejected.** Parsing `compile_commands.json` automatically would be
+more convenient, but it is a second input format with its own failure modes, and
+the brief does not ask for it.  Guessing include paths from the tree would be
+worse than either: a silent wrong path produces wrong diagnostics, which is harder
+to notice than a missing flag.  Explicit flags keep one source of truth.
+
+**Consequence.** Debugging a real file is now:
+
+    fixit src/parser.cpp -Iinclude --agent --llm openai ...
+
+with `-I` matching whatever the project already uses.

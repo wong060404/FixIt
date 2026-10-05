@@ -273,6 +273,28 @@ emits a patch it deliberately declares the wrong line (`+1`), so every demo also
 exercises the fuzzy path. `OpenAiLlm` speaks `/v1/chat/completions` over
 `cpp-httplib`.
 
+### 6.4 Repairing a file that has project headers
+
+`fixit` starts its own compiler, so a file that includes a project header needs to
+be told where that header lives:
+
+```bash
+./build/bin/fixit src/parser.cpp -Iinclude -Ithird_party/lib -DDEBUG=1 --agent --llm mock
+```
+
+`-I DIR` / `--include DIR`, `-D NAME[=VALUE]` and `--flag FLAG` are passed to the
+compiler verbatim and are repeatable; the joined `-Iinclude` form works too.  The
+echoed command line shows exactly what was run:
+
+```
+$ g++ -std=c++20 -fsyntax-only -Iinclude src/parser.cpp
+```
+
+Without the flags the compiler stops at `'x.h' file not found` and never reaches
+the real errors.  Easiest habit: run `fixit` from the directory you would normally
+compile from, with the same `-I` flags you already use, or let
+`compile_commands.json` tell you what they are.
+
 ### 6.5 Using a real model over https
 
 The default build has no TLS, because OpenSSL is not one of the four permitted

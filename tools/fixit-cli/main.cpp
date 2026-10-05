@@ -68,6 +68,10 @@ struct Options {
   bool no_write = false;  ///< repair a scratch copy and leave the tree untouched
   bool show_timing = true;  ///< --no-timing keeps the transcript byte-reproducible
   bool outline = false;     ///< print the CodeMap view of the file and stop
+  /// Extra flags handed to the compiler verbatim (`-I`, `-D`, `-std=`, ...).
+  /// Without this, any file that includes a project header fails with
+  /// "'x.h' file not found" before FixIt can do anything.
+  std::vector<std::string> extra_flags;
 };
 
 void usage(std::ostream& out) {
@@ -90,6 +94,12 @@ void usage(std::ostream& out) {
                           across runs (used by tools/record_demo.sh)
   --outline               print the structural map (functions, includes, syntax
                           errors) instead of compiling
+  -I DIR, --include DIR   add a compiler include path (repeatable)
+  -D NAME[=VALUE]         define a preprocessor symbol (repeatable)
+  --flag FLAG             pass any other compiler flag verbatim (repeatable)
+
+  Example:
+    fixit src/parser.cpp -Iinclude -Ithird_party/lib -DDEBUG=1
   -h, --help              this message
 
 Exit codes: 0 clean or fixed, 1 not fixed, 2 usage error, 3 internal error.
@@ -124,6 +134,22 @@ std::optional<Options> parse_args(int argc, char** argv, int& exit_code) {
       options.show_timing = false;
     } else if (arg == "--outline") {
       options.outline = true;
+    } else if (arg == "-I" || arg == "--include") {
+      const auto value = needs_value(i, arg.c_str());
+      if (!value) return std::nullopt;
+      options.extra_flags.push_back("-I" + *value);
+    } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
+      options.extra_flags.push_back(arg);  // -Iinclude, the joined form
+    } else if (arg == "-D" || arg == "--define") {
+      const auto value = needs_value(i, arg.c_str());
+      if (!value) return std::nullopt;
+      options.extra_flags.push_back("-D" + *value);
+    } else if (arg.rfind("-D", 0) == 0 && arg.size() > 2) {
+      options.extra_flags.push_back(arg);
+    } else if (arg == "--flag") {
+      const auto value = needs_value(i, "--flag");
+      if (!value) return std::nullopt;
+      options.extra_flags.push_back(*value);
     } else if (arg == "--verbose") {
       options.verbose = true;
     } else if (arg == "--llm") {
@@ -309,6 +335,7 @@ int main(int argc, char** argv) {
 
   fixit::CompilerConfig config;
   config.compiler = options.compiler;
+  config.extra_flags = options.extra_flags;
   const fixit::Compiler compiler(config);
 
   // --no-write repairs a private copy in a scratch directory, so the working
@@ -377,7 +404,9 @@ int main(int argc, char** argv) {
     const fixit::CompileResult result = compiler.compile(target_file);
     cleanup_scratch();
     std::cout << "══ FixIt v" << kVersion << " · compile mode (" << options.compiler << ") ══\n\n";
-    std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only " << display_file << "\n";
+    std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only";
+    for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
+    std::cout << " " << display_file << "\n";
     if (result.clean()) {
       std::cout << "  " << green("✓ clean") << "\n";
       return 0;
@@ -434,7 +463,9 @@ int main(int argc, char** argv) {
         // repair round happened.
         if (fingerprint == last_fingerprint) return;
         last_fingerprint = fingerprint;
-        std::cout << "$ " << options.compiler << " -fsyntax-only " << display_file << "\n";
+        std::cout << "$ " << options.compiler << " -fsyntax-only";
+      for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
+      std::cout << " " << display_file << "\n";
         if (event.compile.clean()) {
           std::cout << "  " << green("✓ clean") << "\n";
         } else {
@@ -454,7 +485,9 @@ int main(int argc, char** argv) {
       }
       last_fingerprint = fingerprint;
 
-      std::cout << "$ " << options.compiler << " -fsyntax-only " << display_file << "\n";
+      std::cout << "$ " << options.compiler << " -fsyntax-only";
+      for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
+      std::cout << " " << display_file << "\n";
       if (event.compile.clean()) {
         std::cout << "  " << green("✓ clean") << "\n";
         return;

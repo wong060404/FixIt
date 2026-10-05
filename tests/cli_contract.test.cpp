@@ -203,3 +203,46 @@ TEST_CASE("--no-timing keeps the summary free of wall clock values", "[cli]") {
   CHECK(without_timing.exit_code == 0);
   CHECK(without_timing.output.find("s)") == std::string::npos);
 }
+
+TEST_CASE("include paths and defines reach the compiler", "[cli]") {
+  Scratch scratch("flags");
+  fs::create_directories(scratch.path() / "include");
+  write(scratch.path() / "include" / "math_utils.h", "#pragma once\nint add(int a, int b);\n");
+  const fs::path source = scratch.path() / "main.cpp";
+  write(source, "#include \"math_utils.h\"\n\nint main() {\n  return add(1, 2)\n}\n");
+
+  SECTION("without -I the header is not found") {
+    const Run run = run_cli({source.string()});
+    CHECK(run.exit_code == 1);
+    CHECK(run.output.find("file not found") != std::string::npos);
+  }
+
+  SECTION("-I DIR resolves the header and exposes the real error") {
+    const Run run = run_cli({source.string(), "-I", (scratch.path() / "include").string()});
+    CHECK(run.exit_code == 1);
+    CHECK(run.output.find("file not found") == std::string::npos);
+    CHECK(run.output.find("-I" + (scratch.path() / "include").string()) != std::string::npos);
+    // The genuine fault must be reported now.
+    CHECK(run.output.find("';'") != std::string::npos);
+  }
+
+  SECTION("the joined -IDIR form works too") {
+    const Run run = run_cli({source.string(), "-I" + (scratch.path() / "include").string()});
+    CHECK(run.output.find("file not found") == std::string::npos);
+  }
+
+  SECTION("--flag passes anything verbatim") {
+    const Run run = run_cli({source.string(), "--flag",
+                             "-I" + (scratch.path() / "include").string()});
+    CHECK(run.output.find("file not found") == std::string::npos);
+  }
+
+  SECTION("-D defines a symbol") {
+    const fs::path guarded = scratch.path() / "guarded.cpp";
+    write(guarded, "#ifdef USE_ALT\nint alt() { return 1; }\n#else\n#error USE_ALT is not defined\n#endif\n");
+    const Run without = run_cli({guarded.string()});
+    CHECK(without.exit_code == 1);
+    const Run with = run_cli({guarded.string(), "-D", "USE_ALT"});
+    CHECK(with.exit_code == 0);
+  }
+}
