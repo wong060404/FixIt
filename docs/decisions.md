@@ -679,7 +679,20 @@ most often (its `@@` header does not match the expected shape).  The `patch` too
 now returns the reason plus the first 600 bytes of the received diff, and the
 model corrected its format on the next round when this was tested live.
 
-**Consequence for users.** Semicolon/typo/type repairs — replacements — are
-unaffected.  A repair whose patch *adds* lines while quoting surrounding context
-can lose the line after the insertion; use `--no-write` and inspect the diff until
-this is fixed.
+**Resolution.** Fixed in the same series.  The apply path now separates the two
+counts it had conflated:
+
+* the consumed span is the number of **old-side lines the hunk quotes** — context
+  plus removals — widened only towards a *larger* `old_count` from the header (the
+  case the header exists to rescue: a model that omits context);
+* the written output is the quoted context (taken from the file, so untouched code
+  keeps its own bytes), the additions, and any widened context.
+
+A pure deletion (`@@ -2,1 +2,0 @@`, one `-` line and no `+` line) removes its line
+and writes nothing, which the previous shape got wrong in the opposite direction.
+Three bugs were fixed and each is covered: the deletion case, the "widen too
+eagerly" case, and a bounds read when the new side quotes nothing.
+
+The lesson recorded for the test corpus: all 60 generated cases replaced lines, so
+none of them combined quoted context with an inserted line.  The regression test
+for that shape now exists.

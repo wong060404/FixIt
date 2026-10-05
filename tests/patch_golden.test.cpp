@@ -323,30 +323,20 @@ TEST_CASE("an ambiguous hunk is refused rather than silently misplaced",
 }
 
 // ---------------------------------------------------------------------------
-// KNOWN DEFECT (documented, skipped): a hunk that inserts context lines
-// silently deletes the file line after the insertion point.
+// Regression: an insertion hunk must not consume the following line.
 //
-// Found by driving the engine with a real model (GPT-class backend via an
-// OpenAI-compatible endpoint) rather than by the golden corpus, which is why it
-// is recorded here explicitly.  The engine consumes `old_count` file lines while
-// emitting `context + additions` new lines; when a hunk both quotes context and
-// adds a line those counts differ, and the splice resumes one line too late.
+// Found by driving the engine with a real model, not by the golden corpus: every
+// generated case replaced lines, so none combined "quoted context" with "an added
+// line".  The engine used to consume old_count file lines while emitting
+// context + additions, which differ by the number of additions, so the splice
+// resumed one line too late and deleted the line after the insertion point.
 //
-// Reproduce by removing the SKIP below:
-//
-//   file     L1..L11
-//   hunk     @@ -7,3 +7,4 @@   with quotes L7, +INSERTED, L8, L9
-//   observed L7, INSERTED, L8, L10   <- L9 gone
-//   expected L7, INSERTED, L8, L9, L10
-//
-// The fix has to reconcile the header's declared count with the number of lines
-// the hunk actually quotes, which is a deeper change to the apply path than a
-// bounds tweak: two attempts were reverted because they broke the 60-case golden
-// corpus.  Left as a tracked defect with a reproduction rather than an
-// unverified rewrite.
+// The apply path now derives the consumed span from the hunk's old side (context
+// plus removals) and only widens it towards a *larger* declared count, which is
+// the case the header exists to rescue.
 // ---------------------------------------------------------------------------
 TEST_CASE("an insertion hunk must not consume the following line",
-          "[patch][known-defect][!mayfail]") {
+          "[patch][regression]") {
   const std::string content = "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\n";
   const std::string diff =
       "--- a/x.cpp\n+++ b/x.cpp\n@@ -7,3 +7,4 @@\n"

@@ -328,20 +328,19 @@ wall-clock reports so output can be diffed between runs — that is how
 stdout is not a TTY or `NO_COLOR` is set, which keeps `docs/demo_output.txt`
 diffable.
 
-## 6.6 Known defect (open)
+## 6.6 Regression worth knowing about
 
-A hunk that **inserts** lines while quoting surrounding context can drop the line
-after the insertion point.  The apply path consumes `old_count` file lines while
-emitting `context + additions` new lines, and those differ by the number of added
-lines.  Found by driving the engine with a real model; the golden corpus does not
-combine quoted context with an inserted line in that shape.
+A hunk that **inserts** lines while quoting surrounding context used to consume one
+file line too many, silently deleting the line after the insertion point.  It was
+found by driving the engine with a real model rather than by the golden corpus —
+every generated case replaced lines, so none combined quoted context with an added
+line.
 
-* Reproduced by a test tagged `[!mayfail]` in `tests/patch_golden.test.cpp`, so it
-  fails visibly without turning CI red.
-* Replacements are unaffected: missing semicolons, typos and wrong types all
-  apply correctly.
-* Until it is fixed, use `--no-write` and inspect the result before writing back.
-* Recorded as ADR-028 with the exact input, observed output and expected output.
+The apply path now derives the replaced span from the hunk's old side (context plus
+removals) and only widens it towards a *larger* count declared in the header, which
+is the case the header exists to rescue.  `[patch][regression]` in
+`tests/patch_golden.test.cpp` covers it, and ADR-028 records the defect, the two
+reverted attempts and the final fix.
 
 ## 7. Testing
 
