@@ -211,16 +211,23 @@ TEST_CASE("include paths and defines reach the compiler", "[cli]") {
   const fs::path source = scratch.path() / "main.cpp";
   write(source, "#include \"math_utils.h\"\n\nint main() {\n  return add(1, 2)\n}\n");
 
-  SECTION("without -I the header is not found") {
+  // The wording differs: clang says "file not found", GCC "No such file or
+  // directory".  Assert the fault, not one compiler's phrasing.
+  const auto header_missing = [](const std::string& output) {
+    return output.find("file not found") != std::string::npos ||
+           output.find("No such file or directory") != std::string::npos;
+  };
+
+  SECTION("without -I the header cannot be found") {
     const Run run = run_cli({source.string()});
     CHECK(run.exit_code == 1);
-    CHECK(run.output.find("file not found") != std::string::npos);
+    CHECK(header_missing(run.output));
   }
 
   SECTION("-I DIR resolves the header and exposes the real error") {
     const Run run = run_cli({source.string(), "-I", (scratch.path() / "include").string()});
     CHECK(run.exit_code == 1);
-    CHECK(run.output.find("file not found") == std::string::npos);
+    CHECK_FALSE(header_missing(run.output));
     CHECK(run.output.find("-I" + (scratch.path() / "include").string()) != std::string::npos);
     // The genuine fault must be reported now.
     CHECK(run.output.find("';'") != std::string::npos);
@@ -228,13 +235,13 @@ TEST_CASE("include paths and defines reach the compiler", "[cli]") {
 
   SECTION("the joined -IDIR form works too") {
     const Run run = run_cli({source.string(), "-I" + (scratch.path() / "include").string()});
-    CHECK(run.output.find("file not found") == std::string::npos);
+    CHECK_FALSE(header_missing(run.output));
   }
 
   SECTION("--flag passes anything verbatim") {
     const Run run = run_cli({source.string(), "--flag",
                              "-I" + (scratch.path() / "include").string()});
-    CHECK(run.output.find("file not found") == std::string::npos);
+    CHECK_FALSE(header_missing(run.output));
   }
 
   SECTION("-D defines a symbol") {
