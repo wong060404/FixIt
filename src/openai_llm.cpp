@@ -5,6 +5,8 @@
 // see docs/decisions.md ADR-005.
 
 #include <cstddef>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -151,6 +153,39 @@ LlmResponse OpenAiLlm::chat(const std::vector<Message>& messages,
     client.set_follow_location(true);
     client.set_connection_timeout(30);
     client.set_read_timeout(120);
+
+    // Where do the trusted CAs come from?  A system OpenSSL does not read the
+    // macOS Keychain (that is a SecureTransport/CFNetwork privilege, which is why
+    // curl works out of the box), and this machine had no OpenSSL default path
+    // either -- so verification failed against a perfectly valid Let's Encrypt
+    // certificate.  Point OpenSSL at a bundle explicitly.
+    //
+    // FIXIT_CA_BUNDLE overrides; otherwise the platform bundle is used when it
+    // exists.  Verification is never disabled.
+    const char* ca_from_env = std::getenv("FIXIT_CA_BUNDLE");
+    std::string ca_bundle = (ca_from_env != nullptr && *ca_from_env != '\0')
+                                ? std::string(ca_from_env)
+                                : std::string();
+#if defined(__APPLE__)
+    if (ca_bundle.empty()) {
+      // Shipped by macOS (and used by its curl); contains the public roots.
+      std::ifstream system_bundle("/etc/ssl/cert.pem");
+      if (system_bundle) ca_bundle = "/etc/ssl/cert.pem";
+    }
+#endif
+    if (ca_bundle.empty()) {
+      for (const char* candidate : {"/etc/ssl/certs/ca-certificates.crt",
+                                    "/etc/pki/tls/certs/ca-bundle.crt",
+                                    "/etc/ssl/ca-bundle.pem"}) {
+        std::ifstream bundle(candidate);
+        if (bundle) {
+          ca_bundle = candidate;
+          break;
+        }
+      }
+    }
+    if (!ca_bundle.empty()) client.set_ca_cert_path(ca_bundle.c_str());
+    client.enable_server_certificate_verification(true);
     result = client.Post(endpoint.path, headers, body.dump(), "application/json");
     if (!handle(result)) {
       response.is_final = true;

@@ -1,0 +1,157 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      // fixit 自帶 cmake，不必另外安裝；加進 PATH 讓 CMake 內部呼叫得到
+      "PATH": "/Users/alex_wcc/Documents/deepseek-harness/default-workspace/.buildtools/cmake/data/bin:${env:PATH}"
+    }
+  },
+  "tasks": [
+    {
+      "label": "cmake: configure",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S",
+        "${workspaceFolder}",
+        "-B",
+        "${workspaceFolder}/build",
+        "-DCMAKE_BUILD_TYPE=Debug"
+      ],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "產生 build/ 設定（只在改過 CMakeLists.txt 後需要重跑）"
+    },
+    {
+      "label": "cmake: build",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "${workspaceFolder}/build", "--parallel"],
+      "problemMatcher": ["$gcc"],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "建置整個 fixit 專案（執行檔在 build/bin/）"
+    },
+    {
+      "label": "cmake: clean rebuild",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "${workspaceFolder}/build", "--target", "clean"],
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "清掉產物後重新完整建置"
+    },
+    {
+      "label": "run: fixit --help",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/fixit",
+      "args": ["--help"],
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": false },
+      "detail": "看 CLI 用法"
+    },
+    {
+      "label": "run: fixit outline 目前檔案",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/fixit",
+      "args": ["${file}", "--outline"],
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": false },
+      "detail": "對目前開啟的檔案印出結構圖（不會改檔）"
+    },
+    {
+      "label": "run: fixit --no-write 目前檔案",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/fixit",
+      "args": ["${file}", "--agent", "--no-write"],
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": false },
+      "detail": "在暫存副本上跑修復流程，不動你的原始檔"
+    },
+    {
+      "label": "test: 全部 ctest",
+      "type": "shell",
+      "command": "ctest",
+      "args": ["--test-dir", "${workspaceFolder}/build", "--output-on-failure"],
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "執行整個測試套件"
+    },
+    {
+      "label": "test: codemap.test",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/codemap.test",
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只跑 codemap 測試"
+    },
+    {
+      "label": "test: compiler.test",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/compiler.test",
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只跑 compiler 測試"
+    },
+    {
+      "label": "test: patch_golden.test",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/patch_golden.test",
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只跑 patch golden 測試"
+    },
+    {
+      "label": "test: cli_contract.test",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/cli_contract.test",
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只跑 CLI 契約測試"
+    },
+    {
+      "label": "test: agent_mock.test",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/agent_mock.test",
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只跑 agent（mock LLM）測試"
+    },
+    {
+      "label": "test: expected_artifacts.test",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/bin/expected_artifacts.test",
+      "dependsOn": ["cmake: build"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只跑產物比對測試"
+    },
+    {
+      "label": "cpp: 單檔編譯目前檔案（小心：多數檔案需 CMake）",
+      "type": "shell",
+      "command": "/usr/bin/clang++",
+      "args": [
+        "-std=c++20",
+        "-fcolor-diagnostics",
+        "-g",
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}"
+      ],
+      "options": { "cwd": "${fileDirname}" },
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只適合完全獨立的單檔。src/ tests/ 需搭配 CMake，examples/buggy/ 是故意寫壞的素材"
+    }
+  ]
+}

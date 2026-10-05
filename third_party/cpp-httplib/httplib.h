@@ -14,6 +14,13 @@
 #undef CPPHTTPLIB_OPENSSL_SUPPORT
 #endif
 
+/* fixit local patch: same treatment for the macOS Keychain switch.  Upstream
+   tests it with #ifdef, so -D...=0 would still enable it and the link would then
+   require CoreFoundation and Security. */
+#if defined(CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN) &&     !CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN
+#undef CPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN
+#endif
+
 
 #define CPPHTTPLIB_VERSION "0.59.0"
 #define CPPHTTPLIB_VERSION_NUM "0x003b00"

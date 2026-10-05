@@ -597,3 +597,41 @@ are real, the driver is not), it is not part of the build, and it does not repla
 CI: the ubuntu/gcc-12 job remains the authority on real GCC.  It shortens the
 feedback loop from one CI round trip to seconds, which is what the two failures
 above actually cost.
+
+---
+
+## ADR-027 — TLS is opt-in, and its trust store is explicit
+
+**Context.** The brief allows exactly four dependencies and OpenSSL is not one of
+them, so `https://` is not available in a default build.  A user with their own
+API key on an `https://` endpoint therefore cannot use the tool without opting in.
+Opting in then surfaced two macOS realities that had to be handled rather than
+documented away:
+
+1. cpp-httplib loads the trust store from the Keychain on Apple, which requires
+   `CoreFoundation` and `Security`.  Passing `"-framework X"` as a plain string in
+   an `INTERFACE` link does not survive to the final executable and the symbols go
+   missing, so the frameworks are resolved with `find_library()` and attached to
+   the targets that actually link.
+2. A system OpenSSL does not read the Keychain (that is a SecureTransport
+   privilege, which is why the system `curl` works), so certificate verification
+   failed against a valid Let's Encrypt certificate.  The Keychain switch also had
+   to be normalised, because the vendored httplib tests it with `#ifdef` and
+   `-D...=0` therefore still enabled it.
+
+**Decision.** `FIXIT_ENABLE_OPENSSL=ON` provides TLS, with
+`FIXIT_MACOS_KEYCHAIN_CERTS` (default `ON`) choosing between the Keychain and a CA
+bundle.  In both cases `OpenAiLlm` points OpenSSL at a bundle explicitly:
+`$FIXIT_CA_BUNDLE` if set, else `/etc/ssl/cert.pem` on macOS, else the usual Linux
+paths, and only if one exists.  Certificate verification is never disabled.
+Both build flavours pass the full suite.
+
+**Rationale.** "It failed SSL verification" is the least actionable error a user
+can get, and silently disabling verification would be worse.  Making the trust
+store explicit keeps the four-dependency rule (TLS stays opt-in) while letting a
+user with a key actually use it.
+
+**Key handling.** `--api-key`/`FIXIT_API_KEY` remain the only sources.  The
+wrapper `tools/fixit_with_my_key.sh` reads the value and then unsets it before
+exec'ing the CLI, so the key is not in `argv` and cannot reach a trace or metrics
+file; a test asserts a planted key appears in neither.

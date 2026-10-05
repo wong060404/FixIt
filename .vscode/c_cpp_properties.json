@@ -1,0 +1,19 @@
+{
+  // 用 CMake 產生的編譯資料庫餵給 IntelliSense，這樣 catch2 / tree-sitter 的標頭都找得到
+  "configurations": [
+    {
+      "name": "fixit-cmake",
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+      "includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/third_party/Catch2/src/catch2",
+        "${workspaceFolder}/third_party/**"
+      ],
+      "compilerPath": "/usr/bin/clang++",
+      "cStandard": "c17",
+      "cppStandard": "c++20",
+      "intelliSenseMode": "macos-clang-arm64"
+    }
+  ],
+  "version": 4
+}

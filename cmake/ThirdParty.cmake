@@ -93,8 +93,6 @@ endif()
 # plain HTTP endpoints (Ollama, vLLM, llama.cpp server, test doubles) are
 # supported out of the box.  Set FIXIT_ENABLE_OPENSSL=ON when a system OpenSSL
 # is available to also reach https:// endpoints.
-option(FIXIT_ENABLE_OPENSSL "Link cpp-httplib against a system OpenSSL" OFF)
-
 if(TARGET httplib::httplib)
   target_link_libraries(fixit_third_party INTERFACE httplib::httplib)
 else()

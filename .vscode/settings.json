@@ -1,0 +1,40 @@
+{
+  // --- CMake Tools 設定（對應 tasks.json 用的同一組路徑）---
+  "cmake.cmakePath": "/Users/alex_wcc/Documents/deepseek-harness/default-workspace/.buildtools/cmake/data/bin/cmake",
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.generator": "Unix Makefiles",
+  "cmake.configureOnOpen": false,
+  "cmake.configureArgs": ["-DCMAKE_BUILD_TYPE=Debug"],
+
+  // --- IntelliSense / 格式化 ---
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.compilerPath": "/usr/bin/clang++",
+  "C_Cpp.default.intelliSenseMode": "macos-clang-arm64",
+  "C_Cpp.formatting": "clangFormat",
+  "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: Google, IndentWidth: 4, ColumnLimit: 100 }",
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "editor.formatOnSave": true
+  },
+  "[c]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "editor.formatOnSave": true
+  },
+
+  // --- 讓 CMake 相關檔案好讀 ---
+  "files.associations": {
+    "*.hpp": "cpp",
+    "*.h": "cpp",
+    "CMakeLists.txt": "cmake"
+  },
+  "search.exclude": {
+    "build/**": true,
+    "build-gccsim/**": true
+  },
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/build-gccsim/**": true
+  }
+}

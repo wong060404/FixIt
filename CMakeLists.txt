@@ -26,6 +26,8 @@ option(FIXIT_BUILD_CLI "Build the fixit command line tool" ON)
 option(FIXIT_FETCH_DEPS
        "Force downloading dependencies with FetchContent even when third_party/ is populated"
        OFF)
+option(FIXIT_ENABLE_OPENSSL "Link cpp-httplib against a system OpenSSL" OFF)
+option(FIXIT_MACOS_KEYCHAIN_CERTS "Use the macOS Keychain for CA certificates" ON)
 
 if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -58,6 +60,17 @@ else()
 endif()
 
 target_compile_definitions(fixit PUBLIC FIXIT_VERSION="${PROJECT_VERSION}")
+
+# When cpp-httplib is built with OpenSSL on macOS it loads the trust store from
+# the Keychain, which needs these two frameworks.  They are attached here, to the
+# targets that actually link, rather than only to the INTERFACE library: a static
+# library does not propagate a framework requirement to the final executable on
+# its own.
+if(APPLE AND FIXIT_ENABLE_OPENSSL AND FIXIT_MACOS_KEYCHAIN_CERTS)
+  find_library(FIXIT_COREFOUNDATION CoreFoundation REQUIRED)
+  find_library(FIXIT_SECURITY Security REQUIRED)
+  target_link_libraries(fixit PUBLIC "${FIXIT_COREFOUNDATION}" "${FIXIT_SECURITY}")
+endif()
 
 # ---------------------------------------------------------------------------
 # CLI

@@ -81,6 +81,36 @@ Dependencies come from the vendored snapshot in `third_party/`; a checkout that
 lacks it (for example a tarball of just the sources) falls back to `FetchContent`
 against the pinned upstream tags, which needs network access at configure time.
 
+### Building and debugging in VS Code
+
+The checked-in `.vscode/` folder is set up for this CMake project, so `F5` builds
+with CMake first and then debugs `build/bin/*` with lldb:
+
+| Action | How |
+| --- | --- |
+| Build everything | `Cmd+Shift+B` (task `cmake: build`) |
+| Debug the CLI on the file you have open | `F5` → `fixit CLI：對目前檔案跑 --outline（mock LLM）` |
+| Debug a test binary | `F5` → `測試：compiler.test` (one entry per test binary) |
+| Run the whole suite | task `test: 全部 ctest` |
+| Re-generate the build dir | task `cmake: configure` |
+
+`cmake` is not installed system-wide on this machine; the tasks and the CMake
+Tools integration point at the bundled copy in
+`../.buildtools/cmake/data/bin/cmake`.
+
+**Do not debug with `C/C++: 建置使用中檔案`.** That auto-generated task compiles a
+single `.cpp` in isolation, which cannot work here:
+
+* `src/*.cpp` and `tests/*.cpp` need the CMake-provided include paths (Catch2,
+  tree-sitter, `httplib`), so a lone `clang++ file.cpp` fails with
+  `'catch2/catch_test_macros.hpp' file not found`.
+* `examples/buggy/*.cpp` are **intentionally broken** fixtures — a failed compile
+  is their designed behaviour, not an environment problem.
+
+If `F5` ever reports *"Errors exist after running preLaunchTask"*, run
+`cmake: build` once and read the compile output: it is a real compiler error, or
+the wrong kind of file was being compiled in isolation.
+
 ## 4. Demo Transcript
 
 Recorded from a real run — the full file is [`docs/demo_output.txt`](docs/demo_output.txt).
@@ -242,6 +272,44 @@ just another `ToolRegistry::add`. `MockLlm` is rule-based and offline; when it
 emits a patch it deliberately declares the wrong line (`+1`), so every demo also
 exercises the fuzzy path. `OpenAiLlm` speaks `/v1/chat/completions` over
 `cpp-httplib`.
+
+### 6.5 Using a real model over https
+
+The default build has no TLS, because OpenSSL is not one of the four permitted
+dependencies.  `https://` endpoints therefore need a TLS-enabled build:
+
+```bash
+cmake -B build-tls -DCMAKE_BUILD_TYPE=Release -DFIXIT_ENABLE_OPENSSL=ON
+cmake --build build-tls -j
+```
+
+`find_package(OpenSSL)` locates a system OpenSSL.  Two macOS specifics are worth
+knowing, both learned the hard way on this project:
+
+* cpp-httplib loads the trust store from the **Keychain** on Apple, which needs
+  `CoreFoundation` and `Security`; the build links them automatically.  Pass
+  `-DFIXIT_MACOS_KEYCHAIN_CERTS=OFF` to skip that and use a CA bundle instead.
+* A system OpenSSL does **not** read the Keychain, so `https://` fails with
+  `SSL server verification failed` even against a valid Let's Encrypt
+  certificate.  `OpenAiLlm` therefore points OpenSSL at a bundle explicitly:
+  `$FIXIT_CA_BUNDLE` if set, otherwise `/etc/ssl/cert.pem` on macOS (the bundle
+  macOS ships for its own curl), otherwise the usual Linux paths.  Verification
+  is never disabled.
+
+Then run against any OpenAI-compatible endpoint:
+
+```bash
+export FIXIT_API_KEY=sk-...          # or: --api-key
+
+./build-tls/bin/fixit your_file.cpp --agent --llm openai \
+  --base-url https://your-endpoint/v1 \
+  --model your-model --verbose --no-write
+```
+
+`tools/fixit_with_my_key.sh` wraps this for a project-local setup: it reads the
+key from `$FIXIT_API_KEY` or a git-ignored `.secrets/fixit_key`, keeps it out of
+`argv` (so it cannot appear in `ps` output or a log), and unexports it before the
+child runs, so no trace or metrics file can contain it.
 
 ### 6.5 CLI
 
