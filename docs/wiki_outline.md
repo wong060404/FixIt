@@ -25,7 +25,7 @@ Record with `tools/record_demo.sh` running live (the script writes the text
 transcript; capture the terminal for the GIF). 60–90 seconds:
 
 1. `fixit e1_missing_include.cpp --agent --llm mock --verbose` → exit 0.
-2. `fixit e2_drift.cpp --agent --llm mock --verbose` → exit 0 from 50 lines of drift.
+2. `fixit e2_drift.cpp --agent --llm mock --verbose` → exit 0 from 37 lines of drift.
 3. `fixit e3_type_error.cpp --agent --llm mock --verbose` → exit 1, reported honestly.
 4. `ctest --test-dir build --output-on-failure` → `100% tests passed`.
 
@@ -79,7 +79,7 @@ tool calls and observations) is what `--trace` writes.
 
 ## 5. Architecture and code pointers
 
-Reuse the README's ASCII diagram (§5) and link the four headers:
+Reuse the README's ASCII diagram (§5) and link the five headers:
 `include/fixit/{compiler,codemap,patch,agent}.h`. Call out the two design rules
 that make the loop trustworthy:
 
@@ -99,7 +99,7 @@ that make the loop trustworthy:
 ## 7. Links
 
 * Repository and README quick start.
-* `docs/decisions.md` — all 15 ADRs.
+* `docs/decisions.md` — all 29 ADRs (ADR-001 … ADR-029).
 * CI badge (gcc-12 on Ubuntu, clang on macOS) — both platforms gate merges.
 
 ---

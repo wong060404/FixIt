@@ -26,12 +26,20 @@ function(fixit_fetch NAME REPO TAG)
   endif()
 endfunction()
 
-fixit_fetch(tree-sitter     https://github.com/tree-sitter/tree-sitter.git     v0.26.13)
+# These tags must match what third_party/ actually contains.  They drifted once
+# (the snapshot held cpp-httplib 0.59.0 while this pinned v0.28.0, and Catch2
+# 3.16.0 against v3.8.1), which would have made the offline snapshot and the
+# FetchContent fallback behave differently -- and the vendored cpp-httplib carries
+# a local patch, so a different upstream revision need not even compile.
+# tree-sitter 0.28.0 is not released yet (the newest tag is v0.27.0), so the
+# snapshot cannot be named by tag.  Pinning the commit the snapshot was taken from
+# is the only way to keep the two paths identical; bump both together.
+fixit_fetch(tree-sitter     https://github.com/tree-sitter/tree-sitter.git     752c612a1359f00e4c113593837a0c1e880214e3)
 fixit_fetch(tree-sitter-cpp https://github.com/tree-sitter/tree-sitter-cpp.git v0.23.4)
 fixit_fetch(json            https://github.com/nlohmann/json.git               v3.12.0)
-fixit_fetch(cpp-httplib     https://github.com/yhirose/cpp-httplib.git         v0.28.0)
+fixit_fetch(cpp-httplib     https://github.com/yhirose/cpp-httplib.git         v0.59.0)
 if(FIXIT_BUILD_TESTS)
-  fixit_fetch(Catch2        https://github.com/catchorg/Catch2.git             v3.8.1)
+  fixit_fetch(Catch2        https://github.com/catchorg/Catch2.git             v3.16.0)
 endif()
 
 # ---------------------------------------------------------------------------

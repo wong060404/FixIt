@@ -135,13 +135,19 @@ forces the download path.
 
 Pinned revisions:
 
-| Component | Version |
-|---|---|
-| tree-sitter runtime | 0.28 development snapshot (language ABI 15) |
-| tree-sitter-cpp | v0.23.4 (grammar ABI 15) |
-| nlohmann/json | v3.12.0 |
-| cpp-httplib | v0.28.0 |
-| Catch2 | v3.8.1 |
+| Component | Snapshot and FetchContent pin | Notes |
+|---|---|---|
+| tree-sitter runtime | 0.28.0, pinned by commit `752c612a` | 0.28.0 is unreleased (newest tag is v0.27.0); the snapshot declares that version and master matches it, so a tag cannot identify it |
+| tree-sitter-cpp | v0.23.4 | grammar ABI 15 |
+| nlohmann/json | v3.12.0 | |
+| cpp-httplib | v0.59.0 | the snapshot carries a local patch (see ADR-027) |
+| Catch2 | v3.16.0 | |
+
+The pins and the snapshot must move together.  They had drifted — the snapshot held
+cpp-httplib 0.59.0 and Catch2 3.16.0 while these lines still named v0.28.0 and
+v3.8.1 — which meant the offline path and the `FetchContent` path would have built
+*different* libraries, and the vendored cpp-httplib is patched, so a different
+upstream revision need not even compile.  Both paths have since been built and run.
 
 **Rationale.** The acceptance criterion is "one command from a fresh clone", and
 a snapshot cannot be broken by an upstream force-push or a network outage at the
@@ -155,14 +161,23 @@ upstream warnings cannot break our build and our warnings cannot be hidden.
 
 ## ADR-007 — Clang JSON dialect is probed, never assumed
 
-**Context.** The brief specifies `-fjson-diagnostics`.  Apple clang 17 rejects it
-(`unknown argument`) and wants `-fdiagnostics-format=json`.  A build that blindly
-passes the documented flag silently loses every diagnostic — the worst possible
-failure mode for a tool whose ground truth is compiler output.
+**Context.** The brief specifies `-fjson-diagnostics`.  A build that blindly passes
+the documented flag silently loses every diagnostic — the worst possible failure
+mode for a tool whose ground truth is compiler output.
+
+This ADR originally claimed Apple clang 17 *wants* `-fdiagnostics-format=json`.
+Measured on the machine this was developed on, clang 17 rejects **both**:
+`-fjson-diagnostics` is an unknown argument and `-fdiagnostics-format=json` fails
+with `invalid value 'json'`.  That is precisely why the flag is probed rather than
+selected by compiler name, and the README was right where this paragraph was
+wrong.
 
 **Decision.** `Compiler` probes the configured compiler once (against an empty
 translation unit), preferring `-fjson-diagnostics`, then
-`-fdiagnostics-format=json`, and finally falls back to the text parser.  The
+`-fdiagnostics-format=json`, and finally falls back to the text parser.  Forcing
+`Text` also stops the probed JSON flag from being sent: passing a JSON flag while
+parsing text yields zero diagnostics from a failed compile, which looks like a
+clean file.  Only `uses_json` decides whether the flag is emitted.  The
 chosen dialect is cached for the lifetime of the `Compiler`; `CompilerConfig::format`
 can force `Text` or `Json`.  `parse_diagnostics()` is exposed so fixtures can
 test both dialects without spawning a process.
@@ -662,16 +677,19 @@ This was **not** found by the golden corpus.  Every golden case inserts a line
 none of them combine "quoted context" with "an added line" in the way a real model
 does.
 
-**Decision.** Record it rather than ship a third speculative fix.  Two attempts
-were reverted: the first segfaulted the suite, the second kept the 60-case golden
-corpus green but broke it in other places, because reconciling the header's
+**Decision (first pass).** Record it rather than ship a third speculative fix.  Two
+attempts were reverted: the first segfaulted the suite, the second kept the 60-case
+golden corpus green but broke it in other places, because reconciling the header's
 declared count with the number of lines a hunk actually quotes changes the
-replacement-span calculation for *every* hunk.  The defect is now:
+replacement-span calculation for *every* hunk.  It was therefore reproduced by a
+test tagged `[!mayfail]` (visibly failing, but unable to turn CI red) and written
+up here with its exact input.
 
-* reproduced by a test tagged `[!mayfail]`, so it fails visibly but cannot turn
-  CI red;
-* documented with its exact input, observed output and expected output;
-* listed as an open item in the README.
+That tag no longer exists: the next section records the fix, and the test is an
+ordinary `[patch][regression]` case that passes.  The lesson that outlived the
+defect is about the corpus, not the code — every generated case *replaced* lines,
+so none combined quoted context with an inserted one, and the shape a real model
+actually emits went untested.
 
 A related gap was fixed in the same pass: a diff that parses to zero hunks used to
 return an empty report with no explanation, which is the failure a real model hits

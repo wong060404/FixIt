@@ -288,276 +288,290 @@ void print_errors(const fixit::CompileResult& result, const std::string& indent)
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (const char* no_colour = std::getenv("NO_COLOR"); no_colour != nullptr && *no_colour != '\0') {
-    g_colour = false;
-  } else if (::isatty(fileno(stdout)) == 0) {
-    g_colour = false;
-  }
+  // Exit code 3 is documented as "internal error".  Until now nothing could
+  // return it, so a std::bad_alloc or a library type_error escaped main and the
+  // process died with a signal instead -- indistinguishable from a crash caused
+  // by the user's own file.  Report it as the documented code.
+  try {
 
-  int exit_code = 3;
-  const std::optional<Options> parsed = parse_args(argc, argv, exit_code);
-  if (!parsed) {
-    // A usage mistake deserves the usage text, not just one line of complaint.
-    if (exit_code == 2) usage(std::cerr);
-    return exit_code;
-  }
-  const Options options = *parsed;
-
-  std::string original_content;
-  {
-    // A directory opens successfully with std::ifstream, and the compiler then
-    // reports nothing for it -- which used to read as "clean".  Require a
-    // regular file so an obvious typo can never look like a passing build.
-    std::error_code error;
-    if (!std::filesystem::is_regular_file(options.file, error)) {
-      std::cerr << "fixit: '" << options.file << "' is not a readable file\n";
-      return 2;
+    if (const char* no_colour = std::getenv("NO_COLOR"); no_colour != nullptr && *no_colour != '\0') {
+      g_colour = false;
+    } else if (::isatty(fileno(stdout)) == 0) {
+      g_colour = false;
     }
-    std::ifstream probe(options.file, std::ios::binary);
-    if (!probe) {
-      std::cerr << "fixit: cannot open '" << options.file << "'\n";
-      return 2;
+
+    int exit_code = 3;
+    const std::optional<Options> parsed = parse_args(argc, argv, exit_code);
+    if (!parsed) {
+      // A usage mistake deserves the usage text, not just one line of complaint.
+      if (exit_code == 2) usage(std::cerr);
+      return exit_code;
     }
-    std::ostringstream buffer;
-    buffer << probe.rdbuf();
-    original_content = buffer.str();
-  }
+    const Options options = *parsed;
 
-  if (options.llm == "openai" && options.api_key.empty()) {
-    std::cerr << "fixit: --llm openai requires --api-key or the FIXIT_API_KEY environment "
-                 "variable\n";
-    return 2;
-  }
-  if (options.llm != "mock" && options.llm != "openai") {
-    std::cerr << "fixit: unknown --llm value '" << options.llm << "' (expected mock or openai)\n";
-    return 2;
-  }
-
-  fixit::CompilerConfig config;
-  config.compiler = options.compiler;
-  config.extra_flags = options.extra_flags;
-  const fixit::Compiler compiler(config);
-
-  // --no-write repairs a private copy in a scratch directory, so the working
-  // tree is byte-identical afterwards and the demo can be repeated verbatim.
-  std::string scratch_dir;
-  std::string target_file = options.file;
-  if (options.no_write) {
-    std::error_code error;
-    const std::filesystem::path scratch =
-        std::filesystem::temp_directory_path(error) /
-        ("fixit-no-write-" + std::to_string(::getpid()));
-    std::filesystem::create_directories(scratch, error);
-    std::filesystem::copy_file(options.file, scratch / basename_of(options.file),
-                               std::filesystem::copy_options::overwrite_existing, error);
-    scratch_dir = scratch.string();
-    target_file = (scratch / basename_of(options.file)).string();
-  }
-  const auto cleanup_scratch = [&] {
-    if (!scratch_dir.empty()) {
+    std::string original_content;
+    {
+      // A directory opens successfully with std::ifstream, and the compiler then
+      // reports nothing for it -- which used to read as "clean".  Require a
+      // regular file so an obvious typo can never look like a passing build.
       std::error_code error;
-      std::filesystem::remove_all(scratch_dir, error);
-    }
-  };
-
-  const std::string display_file = basename_of(options.file);
-  const std::string workdir = options.no_write ? scratch_dir : dirname_of(options.file);
-
-  const auto started = std::chrono::steady_clock::now();
-  const auto elapsed = [&] {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-  };
-
-  // ---- outline mode --------------------------------------------------------
-  if (options.outline) {
-    const fixit::CodeMap map(options.file);
-    std::cout << "══ FixIt v" << kVersion << " · outline mode ══\n\n";
-    std::cout << display_file << ": " << map.line_count() << " lines, "
-              << map.functions().size() << " functions\n";
-    if (map.has_syntax_errors()) {
-      std::cout << "  " << red("✗ the AST contains syntax errors");
-      const std::vector<int> lines = map.syntax_error_lines();
-      if (!lines.empty()) {
-        std::cout << " on line";
-        if (lines.size() > 1) std::cout << "s";
-        for (std::size_t i = 0; i < lines.size() && i < 10; ++i) {
-          std::cout << (i == 0 ? " " : ", ") << lines[i];
-        }
+      if (!std::filesystem::is_regular_file(options.file, error)) {
+        std::cerr << "fixit: '" << options.file << "' is not a readable file\n";
+        return 2;
       }
-      std::cout << "\n";
-    } else {
-      std::cout << "  " << green("✓ no syntax errors") << "\n";
+      std::ifstream probe(options.file, std::ios::binary);
+      if (!probe) {
+        std::cerr << "fixit: cannot open '" << options.file << "'\n";
+        return 2;
+      }
+      std::ostringstream buffer;
+      buffer << probe.rdbuf();
+      original_content = buffer.str();
     }
-    std::cout << "\n  includes\n";
-    for (const std::string& include : map.includes()) {
-      std::cout << "    " << include << "\n";
-    }
-    std::cout << "\n  functions\n";
-    for (const fixit::FunctionInfo& fn : map.functions()) {
-      std::printf("    L%-4d - L%-4d  %s\n", fn.start_line, fn.end_line, fn.name.c_str());
-    }
-    return 0;
-  }
 
-  // ---- compile-only mode ---------------------------------------------------
-  if (!options.agent) {
-    const fixit::CompileResult result = compiler.compile(target_file);
-    cleanup_scratch();
-    std::cout << "══ FixIt v" << kVersion << " · compile mode (" << options.compiler << ") ══\n\n";
-    std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only";
-    for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
-    std::cout << " " << display_file << "\n";
-    if (result.clean()) {
-      std::cout << "  " << green("✓ clean") << "\n";
+    if (options.llm == "openai" && options.api_key.empty()) {
+      std::cerr << "fixit: --llm openai requires --api-key or the FIXIT_API_KEY environment "
+                   "variable\n";
+      return 2;
+    }
+    if (options.llm != "mock" && options.llm != "openai") {
+      std::cerr << "fixit: unknown --llm value '" << options.llm << "' (expected mock or openai)\n";
+      return 2;
+    }
+
+    fixit::CompilerConfig config;
+    config.compiler = options.compiler;
+    config.extra_flags = options.extra_flags;
+    const fixit::Compiler compiler(config);
+
+    // --no-write repairs a private copy in a scratch directory, so the working
+    // tree is byte-identical afterwards and the demo can be repeated verbatim.
+    std::string scratch_dir;
+    std::string target_file = options.file;
+    if (options.no_write) {
+      std::error_code error;
+      const std::filesystem::path scratch =
+          std::filesystem::temp_directory_path(error) /
+          ("fixit-no-write-" + std::to_string(::getpid()));
+      std::filesystem::create_directories(scratch, error);
+      std::filesystem::copy_file(options.file, scratch / basename_of(options.file),
+                                 std::filesystem::copy_options::overwrite_existing, error);
+      scratch_dir = scratch.string();
+      target_file = (scratch / basename_of(options.file)).string();
+    }
+    const auto cleanup_scratch = [&] {
+      if (!scratch_dir.empty()) {
+        std::error_code error;
+        std::filesystem::remove_all(scratch_dir, error);
+      }
+    };
+
+    const std::string display_file = basename_of(options.file);
+    const std::string workdir = options.no_write ? scratch_dir : dirname_of(options.file);
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto elapsed = [&] {
+      return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+
+    // ---- outline mode --------------------------------------------------------
+    if (options.outline) {
+      const fixit::CodeMap map(options.file);
+      std::cout << "══ FixIt v" << kVersion << " · outline mode ══\n\n";
+      std::cout << display_file << ": " << map.line_count() << " lines, "
+                << map.functions().size() << " functions\n";
+      if (map.has_syntax_errors()) {
+        std::cout << "  " << red("✗ the AST contains syntax errors");
+        const std::vector<int> lines = map.syntax_error_lines();
+        if (!lines.empty()) {
+          std::cout << " on line";
+          if (lines.size() > 1) std::cout << "s";
+          for (std::size_t i = 0; i < lines.size() && i < 10; ++i) {
+            std::cout << (i == 0 ? " " : ", ") << lines[i];
+          }
+        }
+        std::cout << "\n";
+      } else {
+        std::cout << "  " << green("✓ no syntax errors") << "\n";
+      }
+      std::cout << "\n  includes\n";
+      for (const std::string& include : map.includes()) {
+        std::cout << "    " << include << "\n";
+      }
+      std::cout << "\n  functions\n";
+      for (const fixit::FunctionInfo& fn : map.functions()) {
+        std::printf("    L%-4d - L%-4d  %s\n", fn.start_line, fn.end_line, fn.name.c_str());
+      }
       return 0;
     }
-    std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
-                             (result.error_count() == 1 ? " error" : " errors"))
-              << "\n";
-    print_errors(result, "    ");
-    return 1;
-  }
 
-  // ---- agent mode ----------------------------------------------------------
-  std::cout << "══ FixIt v" << kVersion << " · agent mode (" << options.llm << ") ══\n\n";
-
-  std::unique_ptr<fixit::Llm> llm;
-  if (options.llm == "mock") {
-    llm = std::make_unique<fixit::MockLlm>();
-  } else {
-    if (!fixit::openai_tls_available() && options.base_url.rfind("https://", 0) == 0) {
-      std::cerr << "fixit: this build has no TLS support; point --base-url at an http:// "
-                   "OpenAI-compatible server or rebuild with -DFIXIT_ENABLE_OPENSSL=ON\n";
-      return 2;
-    }
-    llm = std::make_unique<fixit::OpenAiLlm>(options.base_url, options.api_key, options.model);
-  }
-
-  // The tools share the loop's compiler, so a `compile` call from the model and
-  // the agent's own verification can never disagree.
-  fixit::ToolRegistry tools = fixit::make_standard_tools(workdir, compiler);
-  fixit::Agent agent(std::move(tools), std::move(llm), compiler, workdir);
-  agent.set_trace_path(options.trace);
-
-  Metrics metrics;
-  // One compile per iteration is printed.  The engine re-compiles to verify a
-  // patch, which can report the identical state; that duplicate is folded into
-  // the next iteration heading instead of being printed twice.
-  int printed_round = -1;
-  std::string last_fingerprint;
-  const auto fingerprint_of = [](const fixit::CompileResult& result) {
-    std::ostringstream os;
-    os << result.exit_code << '|' << (result.clean() ? 1 : 0);
-    for (const fixit::Diagnostic& d : result.diagnostics) {
-      os << '|' << d.line << ':' << d.col << ':' << static_cast<int>(d.level) << ':' << d.message;
-    }
-    return os.str();
-  };
-  agent.set_observer([&](const fixit::Agent::Event& event) {
-    if (!options.verbose) return;  // metrics are collected after the run
-
-    if (event.kind == fixit::Agent::Event::Kind::Compile) {
-      const std::string fingerprint = fingerprint_of(event.compile);
-      if (event.verification) {
-        // Terminal confirmation: report the outcome without pretending a new
-        // repair round happened.
-        if (fingerprint == last_fingerprint) return;
-        last_fingerprint = fingerprint;
-        std::cout << "$ " << options.compiler << " -fsyntax-only";
+    // ---- compile-only mode ---------------------------------------------------
+    if (!options.agent) {
+      const fixit::CompileResult result = compiler.compile(target_file);
+      cleanup_scratch();
+      std::cout << "══ FixIt v" << kVersion << " · compile mode (" << options.compiler << ") ══\n\n";
+      std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only";
       for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
       std::cout << " " << display_file << "\n";
+      if (result.clean()) {
+        std::cout << "  " << green("✓ clean") << "\n";
+        return 0;
+      }
+      std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
+                               (result.error_count() == 1 ? " error" : " errors"))
+                << "\n";
+      print_errors(result, "    ");
+      return 1;
+    }
+
+    // ---- agent mode ----------------------------------------------------------
+    std::cout << "══ FixIt v" << kVersion << " · agent mode (" << options.llm << ") ══\n\n";
+
+    std::unique_ptr<fixit::Llm> llm;
+    if (options.llm == "mock") {
+      llm = std::make_unique<fixit::MockLlm>();
+    } else {
+      if (!fixit::openai_tls_available() && options.base_url.rfind("https://", 0) == 0) {
+        std::cerr << "fixit: this build has no TLS support; point --base-url at an http:// "
+                     "OpenAI-compatible server or rebuild with -DFIXIT_ENABLE_OPENSSL=ON\n";
+        return 2;
+      }
+      llm = std::make_unique<fixit::OpenAiLlm>(options.base_url, options.api_key, options.model);
+    }
+
+    // The tools share the loop's compiler, so a `compile` call from the model and
+    // the agent's own verification can never disagree.
+    fixit::ToolRegistry tools = fixit::make_standard_tools(workdir, compiler);
+    fixit::Agent agent(std::move(tools), std::move(llm), compiler, workdir);
+    agent.set_trace_path(options.trace);
+
+    Metrics metrics;
+    // One compile per iteration is printed.  The engine re-compiles to verify a
+    // patch, which can report the identical state; that duplicate is folded into
+    // the next iteration heading instead of being printed twice.
+    int printed_round = -1;
+    std::string last_fingerprint;
+    const auto fingerprint_of = [](const fixit::CompileResult& result) {
+      std::ostringstream os;
+      os << result.exit_code << '|' << (result.clean() ? 1 : 0);
+      for (const fixit::Diagnostic& d : result.diagnostics) {
+        os << '|' << d.line << ':' << d.col << ':' << static_cast<int>(d.level) << ':' << d.message;
+      }
+      return os.str();
+    };
+    agent.set_observer([&](const fixit::Agent::Event& event) {
+      if (!options.verbose) return;  // metrics are collected after the run
+
+      if (event.kind == fixit::Agent::Event::Kind::Compile) {
+        const std::string fingerprint = fingerprint_of(event.compile);
+        if (event.verification) {
+          // Terminal confirmation: report the outcome without pretending a new
+          // repair round happened.
+          if (fingerprint == last_fingerprint) return;
+          last_fingerprint = fingerprint;
+          std::cout << "$ " << options.compiler << " -fsyntax-only";
+        for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
+        std::cout << " " << display_file << "\n";
+          if (event.compile.clean()) {
+            std::cout << "  " << green("✓ clean") << "\n";
+          } else {
+            const std::size_t errors = event.compile.error_count();
+            std::cout << "  " << red("✗ " + std::to_string(errors) +
+                                     (errors == 1 ? " error" : " errors"))
+                      << "\n";
+            print_errors(event.compile, "    ");
+          }
+          return;
+        }
+        const int heading = event.round == 0 ? 1 : event.round;
+        if (heading == printed_round && fingerprint == last_fingerprint) return;
+        if (heading != printed_round) {
+          printed_round = heading;
+          std::cout << "── iteration " << heading << " " << std::string(28, '-') << "\n";
+        }
+        last_fingerprint = fingerprint;
+
+        std::cout << "$ " << options.compiler << " -fsyntax-only";
+        for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
+        std::cout << " " << display_file << "\n";
         if (event.compile.clean()) {
           std::cout << "  " << green("✓ clean") << "\n";
-        } else {
-          const std::size_t errors = event.compile.error_count();
-          std::cout << "  " << red("✗ " + std::to_string(errors) +
-                                   (errors == 1 ? " error" : " errors"))
-                    << "\n";
-          print_errors(event.compile, "    ");
+          return;
         }
-        return;
-      }
-      const int heading = event.round == 0 ? 1 : event.round;
-      if (heading == printed_round && fingerprint == last_fingerprint) return;
-      if (heading != printed_round) {
-        printed_round = heading;
-        std::cout << "── iteration " << heading << " " << std::string(28, '-') << "\n";
-      }
-      last_fingerprint = fingerprint;
-
-      std::cout << "$ " << options.compiler << " -fsyntax-only";
-      for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
-      std::cout << " " << display_file << "\n";
-      if (event.compile.clean()) {
-        std::cout << "  " << green("✓ clean") << "\n";
-        return;
-      }
-      const std::size_t errors = event.compile.error_count();
-      std::cout << "  " << red("✗ " + std::to_string(errors) + (errors == 1 ? " error" : " errors"))
-                << "\n";
-      print_errors(event.compile, "    ");
-
-      if (!event.compile.diagnostics.empty()) {
-        fixit::CodeMap map(target_file);
-        if (const auto fn = map.enclosing_function(event.compile.diagnostics.front().line, 1)) {
-          std::cout << "  " << yellow("→ context: fn " + fn->name + "() [L" +
-                                      std::to_string(fn->start_line) + "–L" +
-                                      std::to_string(fn->end_line) + "]")
-                    << "\n";
-        }
-      }
-      return;
-    }
-
-    // Patch event
-    std::cout << "  " << yellow("→ patch…") << "\n";
-    for (const fixit::HunkReport& report : event.patch.reports) {
-      // No counting here: `result.patches` below is the single source of truth.
-      // Counting in both places doubled every metric whenever --verbose was on.
-      if (report.status == fixit::HunkReport::Status::Applied) {
-        std::cout << "    " << green("✓ hunk " + std::to_string(report.hunk_index) + " @ L" +
-                                     std::to_string(report.matched_pos))
-                  << "    (exact)\n";
-      } else if (report.status == fixit::HunkReport::Status::FuzzyApplied) {
-        const int drift = report.matched_pos - report.declared_pos;
-        std::cout << "    " << green("✓ hunk " + std::to_string(report.hunk_index) + " @ L" +
-                                     std::to_string(report.matched_pos))
-                  << "   (fuzzy, drift" << (drift >= 0 ? "+" : "") << drift << ")\n";
-      } else {
-        std::cout << "    " << red("✗ hunk " + std::to_string(report.hunk_index) + " failed")
+        const std::size_t errors = event.compile.error_count();
+        std::cout << "  " << red("✗ " + std::to_string(errors) + (errors == 1 ? " error" : " errors"))
                   << "\n";
-        std::cout << "      " << report.failure_reason << "\n";
+        print_errors(event.compile, "    ");
+
+        if (!event.compile.diagnostics.empty()) {
+          fixit::CodeMap map(target_file);
+          if (const auto fn = map.enclosing_function(event.compile.diagnostics.front().line, 1)) {
+            std::cout << "  " << yellow("→ context: fn " + fn->name + "() [L" +
+                                        std::to_string(fn->start_line) + "–L" +
+                                        std::to_string(fn->end_line) + "]")
+                      << "\n";
+          }
+        }
+        return;
       }
+
+      // Patch event
+      std::cout << "  " << yellow("→ patch…") << "\n";
+      for (const fixit::HunkReport& report : event.patch.reports) {
+        // No counting here: `result.patches` below is the single source of truth.
+        // Counting in both places doubled every metric whenever --verbose was on.
+        if (report.status == fixit::HunkReport::Status::Applied) {
+          std::cout << "    " << green("✓ hunk " + std::to_string(report.hunk_index) + " @ L" +
+                                       std::to_string(report.matched_pos))
+                    << "    (exact)\n";
+        } else if (report.status == fixit::HunkReport::Status::FuzzyApplied) {
+          const int drift = report.matched_pos - report.declared_pos;
+          std::cout << "    " << green("✓ hunk " + std::to_string(report.hunk_index) + " @ L" +
+                                       std::to_string(report.matched_pos))
+                    << "   (fuzzy, drift" << (drift >= 0 ? "+" : "") << drift << ")\n";
+        } else {
+          std::cout << "    " << red("✗ hunk " + std::to_string(report.hunk_index) + " failed")
+                    << "\n";
+          std::cout << "      " << report.failure_reason << "\n";
+        }
+      }
+    });
+
+    const fixit::AgentResult result = agent.run(display_file, options.iterations);
+    cleanup_scratch();
+
+    // Single source of truth for the counters: the patches the loop recorded.
+    for (const auto& [round, patch] : result.patches) {
+      (void)round;
+      for (const fixit::HunkReport& report : patch.reports) classify(report, metrics);
     }
-  });
 
-  const fixit::AgentResult result = agent.run(display_file, options.iterations);
-  cleanup_scratch();
+    if (!options.metrics.empty()) {
+      write_metrics(options.metrics, metrics, result.success, result.iterations, elapsed());
+    }
 
-  // Single source of truth for the counters: the patches the loop recorded.
-  for (const auto& [round, patch] : result.patches) {
-    (void)round;
-    for (const fixit::HunkReport& report : patch.reports) classify(report, metrics);
+    const std::string suffix =
+        options.show_timing ? " (" + fixed1(elapsed()) + "s)" : std::string();
+    if (result.success) {
+      std::cout << green("✔ Fixed " + std::to_string(result.errors_fixed) + " errors in " +
+                         std::to_string(result.iterations) + " iterations" + suffix)
+                << "\n";
+      return 0;
+    }
+
+    std::cout << red("✗ Not fixed after " + std::to_string(result.iterations) + " iterations" +
+                     suffix) << "\n";
+    if (!result.final_errors.empty()) {
+      std::cout << "  remaining errors:\n";
+      print_error_list(result.final_errors, "    ");
+    }
+    return 1;
+
+  } catch (const std::exception& error) {
+    std::cerr << "fixit: internal error: " << error.what() << "\n";
+    return 3;
+  } catch (...) {
+    std::cerr << "fixit: internal error\n";
+    return 3;
   }
-
-  if (!options.metrics.empty()) {
-    write_metrics(options.metrics, metrics, result.success, result.iterations, elapsed());
-  }
-
-  const std::string suffix =
-      options.show_timing ? " (" + fixed1(elapsed()) + "s)" : std::string();
-  if (result.success) {
-    std::cout << green("✔ Fixed " + std::to_string(result.errors_fixed) + " errors in " +
-                       std::to_string(result.iterations) + " iterations" + suffix)
-              << "\n";
-    return 0;
-  }
-
-  std::cout << red("✗ Not fixed after " + std::to_string(result.iterations) + " iterations" +
-                   suffix) << "\n";
-  if (!result.final_errors.empty()) {
-    std::cout << "  remaining errors:\n";
-    print_error_list(result.final_errors, "    ");
-  }
-  return 1;
 }
