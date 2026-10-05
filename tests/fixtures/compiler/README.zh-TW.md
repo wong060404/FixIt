@@ -76,18 +76,17 @@ sources/      the small purpose-built translation units behind the new fixtures
   上的 `g++` 是指向 clang 的符號連結，所以不可能有機器記錄的 `.gcc.txt`。
   每個 GCC 測試資料都是依照 GCC 文件所述的輸出樣式（`file:line:col: level:
   message`、一行 `%5d | src` 邊欄行，以及一行插入號行）手工撰寫。
-  在裝有真正 GCC 的機器上，`tools/record_compiler_fixtures.sh` 會覆寫它們，
-  而 `expect` 區塊必須對照真實輸出重新審查。
-  而 `expect` 區塊必須對照真實輸出重新審查；
+  在裝有真正 GCC 的機器上，`tools/record_compiler_fixtures.sh` 會覆寫它們；
+  而 `expect` 區塊必須對照真實輸出重新審查，重新記錄後也必須重新檢視。
 * **`recorded: synthetic`、clang JSON 方言**——那六個 `n06`…`n11` 測試資料
   以 clang 文件所述的 `-fdiagnostics-format=json` 物件結構描述來序列化
   *實際上*由相同來源的 clang 文字擷取內容所產生的診斷（相同訊息文字、
   相同檔案/行/欄、相同 note）。只有序列化部分是手工撰寫的，因為這裡沒有
   clang 能夠產生它。它們的 `sources/*.cpp` 檔案就是真實文字擷取內容的來源，
   因此兩者可以並排比較。
-  因此兩者可以並排比較。
+  這兩個版本可以相互對照。
+  因此兩者可以逐項對照。
 * `sources/` 底下的一切都是為此測試套件專門打造的。
-
 ### 對等組在構造上就是對齊的
 
 GCC 的錯誤復原方式與 clang 不同：對於 `e1`/`e2`，真正的 GCC 會比 clang 更早
@@ -98,7 +97,7 @@ GCC 的錯誤復原方式與 clang 不同：對於 `e1`/`e2`，真正的 GCC 會
 not name a template type`）；連鎖位置則是刻意設計成與 clang 共用。
 在裝有真正 GCC 的機器上重新記錄會改變它們，而對等性測試
 正是會指出這點的機制。
-而對等性測試正是會指出這點的機制。
+這正是對等性測試預期會出現的情況。
 
 ## 重新產生
 
@@ -139,4 +138,4 @@ tools/record_compiler_fixtures.sh
 在 GCC 機器上重新記錄它們會改變那些欄，而兩個對等性案例的撰寫方式都預期
 這種情況。修復迴圈需要的是行——那才是選取區塊脈絡的依據——而兩個編譯器
 在全部三個來源的行上都是一致的。
-在全部三個來源的行上都是一致的。
+這正是對等性測試所預期的結果。

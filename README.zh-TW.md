@@ -89,13 +89,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 ./build/bin/fixit examples/buggy/e1_missing_include.cpp --agent --llm mock --verbose
 ```
 
-預期結果：§4 的逐字稿，以及結束碼 `0`。這條路徑完全不碰網路。
+預期結果：§4 的逐字稿，以及結束碼 `0`。
 完全不碰網路。
 
 該指令會就地修復範例。加上 `--no-write` 則改為修復一份暫存副本，讓工作樹維持
 位元組完全相同 —— CI 的冒煙測試用的就是這個方式（`tools/record_demo.sh` 也是靠
 在臨時副本上執行來達成），因此兩者隨時都能重跑。
-副本上執行來達成），因此兩者隨時都能重跑。
+在臨時副本上執行來達成），所以兩者隨時都能重跑。
 
 `--llm mock` 是內建的離線模型：它能修復兩種特定的錯誤樣態，測試套件與 demo 用的
 就是它。若要用你自己的模型修復任意程式碼，請見
@@ -119,7 +119,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 相依項目來自 `third_party/` 中的內附快照；若某份 checkout 缺少它（例如只含
 原始碼的 tarball），則會退回使用 `FetchContent` 對照鎖定的上游修訂版本，這在
 configure 階段需要網路連線。兩條路徑都經過實際驗證，也都能建置成功。
-階段需要網路連線。兩條路徑都經過實際驗證，也都能建置成功。
+configure 階段需要網路連線。兩條路徑都經過實測，兩者都能建置。
 
 在驗證該退回路徑時學到的兩件事：
 
@@ -148,7 +148,6 @@ CMake 建置，再以 lldb 除錯 `build/bin/*`：
 
 這台機器並未在全系統安裝 `cmake`；相關任務與 CMake Tools 整合都指向
 `../.buildtools/cmake/data/bin/cmake` 這份內附的副本。
-Tools 整合都指向
 
 **不要用 `C/C++: 建置使用中檔案` 來除錯。** 那個自動產生的任務會孤立地編譯單一
 `.cpp`，在這裡行不通：
@@ -159,7 +158,7 @@ Tools 整合都指向
 * `examples/buggy/e1`–`e3` 是**刻意損壞**的 fixture —— 編譯失敗正是它們預期的
   行為，而不是環境問題。`e4_testing.cpp` 是手動測試時留下的暫存檔；它能乾淨
   編譯，也沒有任何測試或 demo 引用它。
-  引用它。
+  沒有任何測試或 demo 引用它。
 
 若 `F5` 出現 *"Errors exist after running preLaunchTask"*，請先跑一次
 `cmake: build` 並讀取編譯輸出：那是真正的編譯器錯誤，或是被孤立編譯的檔案類型
@@ -204,7 +203,7 @@ $ clang++ -fsyntax-only e1_missing_include.cpp
 `e2_drift.cpp` 把同樣的兩個 bug 搬到再往下 37 行的位置，因此*兩個*宣告位置都是
 錯的，搜尋依然能修好它。`e3_type_error.cpp` 則刻意落在 mock 規則集之外：迴圈會
 回報它未被修復（結束碼 `1`）而不是假裝成功，而它是給真實模型用的 fixture。
-而不是假裝成功，而它是給真實模型用的 fixture。
+而不是假裝成功；它是保留給真實模型用的 fixture。
 
 該逐字稿由 `tools/record_demo.sh` 重新產生，並且可位元重現
 （`--no-timing`、`NO_COLOR=1`），所以 CI 可以對它做 diff。
@@ -397,7 +396,7 @@ cmake --build build-tls -j
 * 系統的 OpenSSL **不會**讀取鑰匙圈，因此即使是有效的 Let's Encrypt
   憑證，`https://` 仍會失敗並出現
   `SSL server verification failed`。所以 `OpenAiLlm` 會明確地為 OpenSSL 指定
-  一個 bundle：若設定了 `$FIXIT_CA_BUNDLE` 就用它，否則在 macOS 上用
+  一個 bundle：若設定了 `` 就用它，否則在 macOS 上用
   `/etc/ssl/cert.pem`（macOS 為自家 curl 隨附的 bundle），再否則使用一般常見的
   Linux 路徑。驗證絕不會被停用。
 
@@ -412,7 +411,7 @@ export FIXIT_API_KEY=sk-...          # or: --api-key
 ```
 
 `tools/fixit_with_my_key.sh` 為專案本地的設定封裝了這一切：它從
-`$FIXIT_API_KEY` 或被 git 忽略的 `.secrets/fixit_key` 讀取金鑰，讓金鑰不進入
+`` 或被 git 忽略的 `.secrets/fixit_key` 讀取金鑰，讓金鑰不進入
 `argv`（因此不會出現在 `ps` 輸出或日誌中），並在子行程執行前取消匯出，
 這樣就沒有任何 trace 或 metrics 檔案能含有它。
 
@@ -429,7 +428,6 @@ fixit <file.cpp> [--agent] [--llm mock|openai] [--model NAME]
 預設值：`--llm mock`、`--model gpt-4o-mini`、`--base-url
 https://api.openai.com/v1`、`--iterations 4`、`--compiler g++`。`--define`
 可作為 `-D` 的同義詞，而 `-h`/`--help` 會印出與本節相同的文字。
-本節。
 
 不帶 `--agent` 時，它只編譯一次並印出診斷訊息。結束碼：
 
@@ -451,12 +449,11 @@ https://api.openai.com/v1`、`--iterations 4`、`--compiler g++`。`--define`
 刪掉插入點之後的那一行。這個問題是靠真實模型驅動引擎才發現的，而不是靠黃金
 案例集 —— 每個產生的案例都是取代行，所以沒有任何一個把引用的上下文與新增行
 結合起來。
-結合起來。
+一行。
 
 現在的套用路徑會從 hunk 的舊側（上下文加上刪除）推導被取代的範圍，並且只會朝
 標頭中所宣告的*更大*行數擴張，而那正是標頭存在所要救援的情況。
 `tests/patch_golden.test.cpp` 中的 `[patch][regression]` 涵蓋了它，而 ADR-028
-記錄了這個缺陷、兩次被撤回的嘗試以及最終的修正。
 記錄了這個缺陷、兩次被撤回的嘗試以及最終的修正。
 
 ## 7. 測試
@@ -510,14 +507,14 @@ roadmap 中。
 
 四種缺陷在每一列中都存在 —— 精確、行尾空白、缺少上下文與多餘上下文 —— 因此
 一個格子代表的就是該種缺陷在該漂移量下的比率。
-一個格子代表的就是該種缺陷在該漂移量下的比率。
+該漂移量下的比率，就是該格子的數字。
 
 前兩列是本專案所主張的能力。第三列則是它誠實的極限：當上下文與好幾個位置同樣
 相符，*而且*宣告的位置又是錯的，就沒有演算法能還原意圖 —— FixIt 會套用到最接近
 的候選位置，而掃描會把它計為一次失誤。見
-前兩列是本專案所主張的能力。第三列則是它誠實的極限：當上下文與好幾個位置同樣
 [`docs/wiki_outline.md`](docs/wiki_outline.md) 與
 [`docs/patch_success_matrix.json`](docs/patch_success_matrix.json)。
+完整的數據見 docs/patch_success_matrix.json。
 
 ## 9. 路線圖
 
@@ -525,7 +522,7 @@ roadmap 中。
   運作（見 §6.6），但 §8a 的數字來自合成掃描，而不是來自模型。把 fixture 集
   跑過一個託管模型 —— 包括 mock 刻意拒絕的 `e3` —— 是尚缺的證據，而不是
   尚缺的管線。
-  尚缺的證據，而不是尚缺的管線。
+  尚缺的部分在於證據，而不是在於管線。
 * **多檔案專案** —— `PatchEngine::parse_diff` 已經會回傳多個
   `DiffFile`，而 `Agent` 也能修補其中任何一個；缺的是一層建置
   系統轉接器，能為整個 target 產出逐檔的診斷訊息。讀取
