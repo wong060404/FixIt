@@ -1,76 +1,81 @@
-# FixIt Windows 完整指南（複製貼上就能用）
+> **English** | [繁體中文](WINDOWS-SETUP.zh-TW.md)
 
-> 從 `git clone` 到修好第一個 bug，每一步都寫清楚「打什麼」和「應該看到什麼」。
-> 不需要任何 C++、編譯器或 Git 的基礎知識。
+# FixIt on Windows — complete guide (clone, build, run)
+
+> From `git clone` to your first repaired bug. Every step says what to type and what you
+> should see. No prior C++, compiler or Git knowledge is assumed.
 >
-> 全部指令都在繁體中文 Windows 11 + PowerShell 上實測過。
+> Every command below was run on Windows 11 with a Traditional Chinese locale and
+> PowerShell.
 
 ---
 
-## 0. 這份指南會帶你到哪裡
+## 0. Where this guide takes you
 
-| 階段 | 你會做到 | 大概時間 |
+| Stage | What you end up with | Time |
 |---|---|---|
-| 安裝（一次就好） | 下載程式、下載編譯器、編譯出 `fixit.exe` | 10–25 分鐘 |
-| 使用 | 用 `fixit` 找出並修好 C++ 的錯誤 | 每次幾秒到幾分鐘 |
-| （選用）接 AI 模型 | 用你自己的 API 或本機模型自動修任意 bug | 5 分鐘 |
+| Install (once) | The program compiled into `fixit.exe`, plus a compiler it can drive | 10–25 min |
+| Use | Find and fix errors in C++ files | seconds to minutes each |
+| (Optional) Model backend | Automatic repair of arbitrary bugs, using your own API or a local model | 5 min |
 
-裝完之後，你電腦上會多出這些東西：
+When you are done, your machine has:
 
 ```
-C:\FixIt\                          ← 工作資料夾（純英文路徑，重要！）
-├── FixIt\                         ← 從 GitHub 複製下來的專案
-│   ├── build-win\bin\fixit.exe    ← 編譯出來的工具（主角）
-│   └── tools\windows\             ← 本指南用到的輔助腳本
-└── toolchain\                     ← 編譯器（解壓即用，免安裝）
+C:\FixIt\                          <- work folder (plain ASCII path: important!)
+├── FixIt\                         <- the project you cloned
+│   ├── build-win\bin\fixit.exe    <- the tool itself
+│   └── tools\windows\             <- helper scripts used by this guide
+└── toolchain\                     <- the compiler (unpacked, nothing installed)
 ```
 
 ---
 
-## 開始前：三個必須知道的規則
+## Before you start: three rules
 
-**規則 1：整個路徑不能有中文、空白或特殊符號。**
-請用 `C:\FixIt`。原因是 Windows 上的 GCC 會把自己函式庫的**絕對路徑**交給連結器，
-而連結器用本地編碼解讀；路徑含中文就會變成亂碼，然後出現一堆看不懂的
-`No such file or directory`。這一步做錯，後面會卡得很痛苦。
+**Rule 1: the whole path must be plain ASCII — no Chinese characters, no spaces.**
+Use `C:\FixIt`. On Windows, gcc hands its own library directory (an absolute path) to
+the linker, which decodes it in the local code page; a non-ASCII path turns into
+mojibake and you get a pile of confusing `No such file or directory` errors. Getting
+this wrong is the most painful way to fail.
 
-**規則 2：不要放在 OneDrive、桌面或「文件」資料夾裡。**
-編譯器和建置產物加起來約 2 GB，OneDrive 會把它們同步上雲端，拖慢整台電腦；
-而且它的「檔案隨選」機制可能讓執行檔變成雲端佔位檔而無法執行。
+**Rule 2: do not put it in OneDrive, on the Desktop, or under Documents.**
+The compiler plus build output is roughly 2 GB, which OneDrive will try to sync; and its
+Files On-Demand feature can turn the built `.exe` into a cloud placeholder that cannot
+run.
 
-**規則 3：FixIt 需要一個真正的 C++ 編譯器。**
-因為它的工作就是「編譯 → 看錯誤 → 修 → 再編譯」。指南第 3 步會幫你下載一個
-免安裝的 GCC，不需要 Visual Studio。
+**Rule 3: FixIt needs a real C++ compiler.**
+Its whole job is compile → read errors → patch → compile again. Step 3 downloads a
+portable GCC for you; you do not need Visual Studio.
 
 ---
 
-## 第一部分：安裝（做一次就好）
+## Part 1 — Install (do this once)
 
-### 步驟 1：確認 Git 與 Python
+### Step 1: check Git and Python
 
-按 **Win 鍵**，輸入 `powershell`，按 **Enter**，會出現一個文字視窗。之後所有指令都打在這裡。
+Press **Win**, type `powershell`, press **Enter**. Every command below goes in that window.
 
 ```powershell
 git --version
 python --version
 ```
 
-**應該看到**兩行版本號，例如：
+**You should see** two version lines, for example:
 
 ```
 git version 2.45.1.windows.1
 Python 3.12.10
 ```
 
-如果有任何一個顯示「無法辨識」：
+If either says "not recognized":
 
-* **Git** → 到 <https://git-scm.com/download/win> 下載，一路按 Next 安裝完。
-* **Python** → 到 <https://www.python.org/downloads/windows/> 下載，
-  **安裝時務必勾選最下方的 `Add python.exe to PATH`**。
+* **Git** → install from <https://git-scm.com/download/win>, clicking Next all the way.
+* **Python** → install from <https://www.python.org/downloads/windows/>. **Tick
+  `Add python.exe to PATH` on the first installer screen.**
 
-裝完**關掉 PowerShell 再重開**，再確認一次。
+Close PowerShell, open it again, and check once more.
 
-### 步驟 2：建立工作資料夾並下載 FixIt
+### Step 2: create the work folder and clone FixIt
 
 ```powershell
 New-Item -ItemType Directory -Force -Path C:\FixIt | Out-Null
@@ -78,36 +83,37 @@ Set-Location C:\FixIt
 git clone https://github.com/wong060404/FixIt.git
 ```
 
-**應該看到**：
+**You should see**:
 
 ```
 Cloning into 'FixIt'...
 Resolving deltas: 100% (.../...), done.
 ```
 
-驗證：
+Check it:
 
 ```powershell
 Test-Path C:\FixIt\FixIt\CMakeLists.txt
 ```
 
-**應該看到** `True`。
+**You should see** `True`.
 
-> 沒有 Git 的話：在 GitHub 網頁按綠色 **Code** → **Download ZIP**，解壓縮後把資料夾
-> 改名為 `FixIt`，放到 `C:\FixIt\` 底下。
+> Without Git: on the GitHub page press the green **Code** button → **Download ZIP**,
+> unpack it, rename the folder to `FixIt`, and put it in `C:\FixIt\`.
 >
-> **Clone 之後不需要再套用任何補丁或複製任何檔案**——專案本身已經內含 Windows 支援
-> 與這份指南用到的輔助腳本。
+> **Nothing has to be patched or copied after cloning** — the Windows support and all
+> helper scripts used by this guide are already in the repository.
 
-### 步驟 3：下載編譯器（約 274 MB）
+### Step 3: download the compiler (about 274 MB)
 
 ```powershell
 python C:\FixIt\FixIt\tools\windows\fetch_mingw.py
 ```
 
-這會從 GitHub 下載 winlibs 的 MinGW-w64 GCC，解壓到 `C:\FixIt\toolchain\`（解壓後約 1.5 GB）。
+This downloads the winlibs MinGW-w64 GCC from GitHub and unpacks it into
+`C:\FixIt\toolchain\` (about 1.5 GB unpacked).
 
-**應該看到**（最後幾行）：
+**You should see** (last lines):
 
 ```
 repository : C:\FixIt\FixIt
@@ -120,30 +126,31 @@ extracted  -> C:\FixIt\toolchain
 compiler   : C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe
 ```
 
-驗證：
+Check it:
 
 ```powershell
 & C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe --version
 ```
 
-**應該看到**第一行類似：
+**You should see** a first line like:
 
 ```
 g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r2) 16.2.0
 ```
 
-> 下載完可以把 `C:\FixIt\FixIt\tools\windows\.cache\` 裡的 zip 刪掉，省 274 MB。
-> 之後要重建也很簡單，重跑一次這個腳本就好。
+> You can delete the zip under `C:\FixIt\FixIt\tools\windows\.cache\` afterwards to save
+> 274 MB. Re-running the script restores it if needed.
 
-### 步驟 4：編譯 FixIt（約 1–3 分鐘）
+### Step 4: build FixIt (about 1–3 minutes)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\FixIt\FixIt\tools\windows\build_fixit.ps1
 ```
 
-（`-ExecutionPolicy Bypass` 只是允許執行這個腳本，不會改變系統設定。）
+(`-ExecutionPolicy Bypass` only allows this script to run for that one command; it does
+not change any system setting.)
 
-**應該看到**一連串 `CC ...`、`CXX ...`，最後是：
+**You should see** a run of `CC ...` and `CXX ...` lines, ending with:
 
 ```
 AR  build-win/libfixit.a
@@ -153,15 +160,15 @@ CXX tools/matrix.cpp
 built: C:\FixIt\FixIt\build-win\bin\fixit-matrix.exe
 ```
 
-驗證：
+Check it:
 
 ```powershell
 Test-Path C:\FixIt\FixIt\build-win\bin\fixit.exe
 ```
 
-**應該看到** `True`。
+**You should see** `True`.
 
-### 步驟 5：立刻試跑（不用網路、不用帳號）
+### Step 5: the first run (no network, no account, no key)
 
 ```powershell
 chcp 65001 > $null
@@ -171,7 +178,7 @@ Set-Location C:\FixIt\FixIt
 .\build-win\bin\fixit.exe examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write --no-timing
 ```
 
-**應該看到**（最後幾行）：
+**You should see** (last lines):
 
 ```
 ── iteration 2 ----------------------------
@@ -186,24 +193,28 @@ $ g++ -fsyntax-only e1_missing_include.cpp
 ✔ Fixed 10 errors in 2 iterations
 ```
 
-**看到 `✔ Fixed ...` 就代表安裝完全成功。** 你剛剛跑的是一個完整的自動修復循環：
+**Seeing `✔ Fixed ...` means the installation worked.** What you just watched is a
+complete repair loop:
 
-| 輸出 | 意義 |
+| Output | Meaning |
 |---|---|
-| `✗ 1 error` / `[E1] L12 …` | FixIt 呼叫真正的編譯器，把錯誤變成結構化資料 |
-| `→ context: fn parse_count() [L10–L13]` | 用 tree-sitter 找出這行錯誤落在哪個函式 |
-| `→ patch…` → `✓ hunk 1 @ L11` | 修補被套用；`fuzzy, drift-1` 表示行號差了一行仍被容錯機制救回 |
-| `✓ clean` | 重新編譯驗證，只有編譯器能宣告成功 |
-| `✔ Fixed 10 errors in 2 iterations` | 結果（exit code 0） |
+| `✗ 1 error` / `[E1] L12 …` | FixIt ran the real compiler and turned its errors into data |
+| `→ context: fn parse_count() [L10–L13]` | tree-sitter located which function the error is in |
+| `→ patch…` → `✓ hunk 1 @ L11` | the patch was applied; `fuzzy, drift-1` means the line number was off by one and the tolerance window rescued it |
+| `✓ clean` | recompiled: only the compiler is allowed to declare success |
+| `✔ Fixed 10 errors in 2 iterations` | the result (exit code 0) |
 
-> `--no-write` 代表只改暫存副本、不動原始檔。想真的改檔案就拿掉這個旗標。
-> `--llm mock` 是內建的離線假模型，只認得四種示範用錯誤——要修你自己的任何 bug，看第二部分。
+> `--no-write` repairs a scratch copy and leaves your file untouched. Drop the flag to
+> repair in place.
+> `--llm mock` is the built-in offline stand-in: it only knows four demonstration fault
+> shapes. To repair anything of your own, see Part 2.
 
 ---
 
-## 第二部分：日常使用
+## Part 2 — Using it
 
-每個新開的 PowerShell 視窗，先打這三行（或見附錄 B 設成永久）：
+In every new PowerShell window, run these three lines first (or make them permanent, see
+Appendix B):
 
 ```powershell
 chcp 65001 > $null
@@ -211,114 +222,120 @@ $env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 ```
 
-| 那三行在幹嘛 | 說明 |
+| What those lines do | Why |
 |---|---|
-| `chcp 65001` | 把主控台切成 UTF-8，否則 FixIt 的框線字元會顯示成 `鈺愨晲` 這種亂碼（只是顯示問題，不影響功能） |
-| 設 `PATH` | 讓 fixit 找到 `g++`。不設也可以，但要每次加 `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` |
-| `NO_COLOR` | 關掉顏色，輸出比較好複製 |
+| `chcp 65001` | switches the console to UTF-8; without it FixIt's box-drawing characters show as mojibake like `鈺愨晲` (cosmetic only) |
+| `PATH` | lets fixit find `g++`. Alternatively pass `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` every time |
+| `NO_COLOR` | turns off colour so output is easier to copy |
 
-### 用法 A：只想找出錯在哪（最快，不用模型）
-
-```powershell
-C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp"
-```
-
-**應該看到**每個錯誤的行號、欄位與訊息。看完就知道要改哪裡。
-
-### 用法 B：看程式結構
+### Use A: just find out what is wrong (fastest, no model)
 
 ```powershell
-C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp" --outline
+C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\your-project\your-file.cpp"
 ```
 
-會列出：有幾個函式、各佔哪幾行、include 了什麼、哪一行有語法錯誤。適合快速熟悉一份陌生程式碼。
+**You should see** every error with its line, column and message.
 
-### 用法 C：接上 AI 模型，自動修復
+### Use B: see the structure of a file
 
-FixIt 支援任何 **OpenAI 相容**的端點。分兩種情況，選一種就好：
+```powershell
+C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\your-project\your-file.cpp" --outline
+```
 
-#### C-1. 本機模型（最簡單，不用金鑰、不用轉發器）
+It lists the functions and their line ranges, the includes, and which lines have syntax
+errors — handy for getting oriented in unfamiliar code.
 
-先裝 [Ollama](https://ollama.com/download)，然後下載一個支援工具呼叫的模型：
+### Use C: let a model repair it
+
+FixIt speaks to any **OpenAI-compatible** endpoint. Pick one of the two:
+
+#### C-1. A local model (simplest: no key, no relay)
+
+Install [Ollama](https://ollama.com/download), then pull a model that supports tool
+calling:
 
 ```powershell
 ollama pull qwen2.5-coder:7b
 ```
 
-直接指過去即可（Ollama 走純 http，不需要轉發器）：
+Point FixIt straight at it (Ollama is plain http, so no relay is needed):
 
 ```powershell
-C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp" `
+C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\your-project\your-file.cpp" `
   --agent --llm openai `
   --base-url http://127.0.0.1:11434/v1 --model qwen2.5-coder:7b --api-key ollama `
   --verbose --no-write
 ```
 
-#### C-2. 你自己的雲端 API（https，需要一個本機轉發器）
+#### C-2. Your own cloud API over https (needs the local relay)
 
-多一層轉發器的原因只有一個：**這個建置沒有 TLS**，fixit 自己不能連 `https://`。
-轉發器讓 fixit 走純 http 連本機，由它帶著你的金鑰走 https 到你的端點。
-附帶好處是**金鑰不會出現在 fixit 的命令列**。
+There is exactly one reason for the relay: **this build has no TLS**, so fixit itself
+cannot reach `https://`. The relay lets fixit speak plain http to localhost while the
+relay talks https to your endpoint with your key. A useful side effect: **your key never
+appears on fixit's command line**.
 
-**先放金鑰**（這個位置已被 `.gitignore` 排除，不會被 commit）：
+**Put the key in place first** (this location is already excluded by `.gitignore`, so it
+cannot be committed):
 
 ```powershell
 New-Item -ItemType Directory -Force -Path C:\FixIt\FixIt\.secrets | Out-Null
-Read-Host -Prompt "貼上 API key 後按 Enter" | Set-Content -NoNewline C:\FixIt\FixIt\.secrets\fixit_key
+Read-Host -Prompt "Paste your API key and press Enter" | Set-Content -NoNewline C:\FixIt\FixIt\.secrets\fixit_key
 ```
 
-**先確認端點、金鑰、模型都可用**（幾秒鐘，避免後面白忙）：
+**Check the endpoint, key and model first** (a few seconds, saves a lot of guessing):
 
 ```powershell
-python C:\FixIt\FixIt\tools\windows\probe-endpoint.py "https://你的端點/v1" "你的模型名稱"
+python C:\FixIt\FixIt\tools\windows\probe-endpoint.py "https://your-endpoint/v1" "your-model-name"
 ```
 
-**應該看到**：
+**You should see**:
 
 ```
 HTTP     : 200
 VERDICT  : endpoint reachable, key accepted, model served, tools field accepted
 ```
 
-`HTTP : 401` 是金鑰不對、`404` 是端點或模型名稱打錯、`transport error` 是網路不通。
+`HTTP : 401` means the key is wrong, `404` means the endpoint path or model name is
+wrong, `transport error` means the network is blocked.
 
-**再開兩個視窗：**
+**Then use two windows.**
 
-視窗 A（轉發器，保持開著不要關）：
+Window A (the relay — leave it running):
 
 ```powershell
-$env:RELAY_TARGET = "https://你的端點/v1"
+$env:RELAY_TARGET = "https://your-endpoint/v1"
 python C:\FixIt\FixIt\tools\windows\llm-relay.py
 ```
 
-**應該看到**：
+**You should see**:
 
 ```
-relay      : http://127.0.0.1:8791  ->  https://你的端點/v1
+relay      : http://127.0.0.1:8791  ->  https://your-endpoint/v1
 key loaded : yes
 ```
 
-> **轉發器開著的時候，你的金鑰會留在它的記憶體裡**，所以用完按 **Ctrl+C** 關掉比較安心。
-> 如果它說 `cannot listen on 127.0.0.1:8791`，代表你已經有另一個轉發器在跑；
-> 直接用它就好，或先關掉舊的再啟動。
+> **While the relay runs, your key sits in its memory**, so press **Ctrl+C** when you are
+> done. If it says `cannot listen on 127.0.0.1:8791`, another relay is already running:
+> just use that one, or stop the old one first.
 
-視窗 B（讓 FixIt 修你的檔案）：
+Window B (let FixIt repair your file):
 
 ```powershell
 chcp 65001 > $null
 $env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 
-C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp" `
+C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\your-project\your-file.cpp" `
   --agent --llm openai `
-  --base-url http://127.0.0.1:8791/v1 --model "你的模型名稱" --api-key relay `
+  --base-url http://127.0.0.1:8791/v1 --model "your-model-name" --api-key relay `
   --verbose --no-write
 ```
 
-**強烈建議先加 `--no-write`**：只改暫存副本，你可以先看它打算怎麼改，確認滿意後
-把 `--no-write` 拿掉再跑一次，它就會直接改你的檔案。
+**Always start with `--no-write`**: it repairs a scratch copy so you can see what the
+model intends before anything is written. When you are happy, run it again without
+`--no-write` to repair the file in place.
 
-**應該看到**類似（以一個大小寫打錯的檔案為例）：
+**You should see** something like (a file with a case-typo, as an example):
 
 ```
 ── iteration 1 ──  ✗ 1 error  [E1] L6 'S' was not declared in this scope
@@ -328,95 +345,103 @@ C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp" `
 ✔ Fixed 1 errors in 2 iterations (3.5s)
 ```
 
-模型可能先呼叫 `read` 多看幾行程式，所以某一輪沒有 `patch` 是正常的。
+The model may call `read` first to look at more of the file, so a round without `patch`
+is normal.
 
-#### C-3. 一鍵跑完整循環（選用）
+#### C-3. One command for the whole loop (optional)
 
-想看到逐輪紀錄、metrics 與修改前後的 diff，用這支腳本（它會自己起轉發器、跑完再收掉）：
+To see the per-round log, the metrics and a before/after diff, use this script — it
+starts the relay itself, runs fixit, and stops the relay afterwards:
 
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File C:\FixIt\FixIt\tools\windows\run-real-loop.ps1 `
-  -BaseUrl "https://你的端點/v1" -Model "你的模型名稱" -File "C:\你的專案\你的檔案.cpp"
+  -BaseUrl "https://your-endpoint/v1" -Model "your-model-name" -File "C:\your-project\your-file.cpp"
 ```
 
-不給 `-File` 的話，它會自己在 `%TEMP%\fixit-demo\demo_bug.cpp` 造一個有一處錯誤的小檔案
-並修給你看，完全不用準備任何東西。
+Without `-File` it creates a small file with one deliberate bug in
+`%TEMP%\fixit-demo\demo_bug.cpp` and repairs that, so you can try the whole thing with
+nothing prepared.
 
-### 常用旗標速查
+### Flags worth knowing
 
-| 旗標 | 作用 |
+| Flag | Effect |
 |---|---|
-| `--agent` | 啟動修復迴圈；不給就只編譯一次並列出診斷 |
-| `--llm mock` / `--llm openai` | 模型後端；預設 `mock` |
-| `--base-url` / `--model` / `--api-key` | 端點、模型、金鑰（金鑰也可用環境變數 `FIXIT_API_KEY`） |
-| `--no-write` | 只修暫存副本，原檔不動（強烈建議先用這個看結果） |
-| `--verbose` | 逐輪顯示診斷、定位、修補命中位置 |
-| `--trace PATH` / `--metrics PATH` | 寫出 JSON 軌跡／統計（每輪模型呼叫了什麼、修補成功率） |
-| `--iterations N` | 最多幾輪修復（預設 4） |
-| `--compiler NAME` | 指定編譯器（預設 `g++`） |
-| `-I DIR` / `-D NAME[=VALUE]` / `--flag FLAG` | 原樣傳給編譯器，可重複（檔案 include 專案標頭時會用到） |
-| `--outline` | 只印結構，不編譯 |
-| `-h` / `--help` | 用法 |
+| `--agent` | run the repair loop; without it, compile once and list diagnostics |
+| `--llm mock` / `--llm openai` | model backend; `mock` is the default |
+| `--base-url` / `--model` / `--api-key` | endpoint, model, key (the key can also come from `FIXIT_API_KEY`) |
+| `--no-write` | repair a scratch copy, leaving your file untouched (start here) |
+| `--verbose` | stream diagnostics, location and patch positions per round |
+| `--trace PATH` / `--metrics PATH` | write a JSON trace / statistics (which tool the model called, patch success rate) |
+| `--iterations N` | maximum repair rounds (default 4) |
+| `--compiler NAME` | compiler to drive (default `g++`) |
+| `-I DIR` / `-D NAME[=VALUE]` / `--flag FLAG` | passed through to the compiler, repeatable (needed when the file includes project headers) |
+| `--outline` | print the structure only, no compile |
+| `-h` / `--help` | usage |
 
-離開代碼：`0` 乾淨或已修好、`1` 未修好、`2` 用法錯誤、`3` 內部錯誤、
-`127` 找不到編譯器（PATH 或 `--compiler` 沒設好）。
+Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` internal error,
+`127` compiler not found (PATH or `--compiler` wrong).
 
 ---
 
-## 疑難排解
+## Troubleshooting
 
-| 你看到的訊息 | 原因 | 解法 |
+| Message you see | Cause | Fix |
 |---|---|---|
-| `'git' 不是內部或外部命令` | 沒裝 Git | 步驟 1 |
-| `'python' 不是內部或外部命令` | 沒裝 Python，或安裝時沒勾 Add to PATH | 步驟 1，裝完要重開視窗 |
-| `fetch_mingw.py` 說 destination contains non-ASCII | 工作路徑含中文 | 改用 `C:\FixIt`，重新 clone |
-| 編譯時一堆 `No such file or directory`、`cannot find -lstdc++` | 編譯器被放在中文路徑下 | 把整個 `C:\FixIt` 換成純英文路徑 |
-| `compiler not found. Looked in: ...` | 還沒下載編譯器 | 先做步驟 3 |
-| `the compiler could not be executed (exit code 127)` | `g++` 不在 PATH，也沒用 `--compiler` 指定 | 跑第二部分開頭那三行 |
-| `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` 直接指到 `https://` | 用 C-2 的轉發器，或改用 C-1 的本機模型 |
-| `RELAY_TARGET is not set.` | 沒告訴轉發器要連哪裡 | 先 `$env:RELAY_TARGET = "https://你的端點/v1"` |
-| `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | 已經有一個轉發器在跑 | 直接用那個，或先關掉舊的，或 `-Port 8792` 換一個埠 |
-| `LLM request returned HTTP 401` / `404` | 金鑰錯 / 端點或模型名稱錯 | 用 `probe-endpoint.py` 先確認 |
-| 轉發器顯示 `key loaded : no` | 金鑰檔不在 `C:\FixIt\FixIt\.secrets\fixit_key` | 見 C-2 |
-| `tool_calls` 一直是空的、模型只回文字 | 該模型不支援工具呼叫 | 換一個支援 function calling 的模型 |
-| 輸出變成 `鈺愨晲`、`鉁?` 這類亂碼 | 主控台不是 UTF-8 | 執行 `chcp 65001` |
-| 執行 `.ps1` 說「因為這個系統上已停用指令碼執行」 | PowerShell 預設禁止 | 如步驟 4 加上 `-ExecutionPolicy Bypass` |
-| 關掉視窗後 PATH 又失效 | 環境變數只在該視窗有效 | 見附錄 B |
+| `'git' is not recognized` | Git not installed | Step 1 |
+| `'python' is not recognized` | Python missing, or PATH not ticked during install | Step 1, then reopen the window |
+| `fetch_mingw.py` says the destination contains non-ASCII | the work path has Chinese characters | use `C:\FixIt` and clone again |
+| `No such file or directory`, `cannot find -lstdc++` while building | the toolchain sits under a non-ASCII path | move the whole `C:\FixIt` to a plain ASCII path |
+| `compiler not found. Looked in: ...` | the compiler has not been downloaded | do Step 3 |
+| `the compiler could not be executed (exit code 127)` | `g++` is not on PATH and `--compiler` was not given | run the three lines at the top of Part 2 |
+| `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` points straight at `https://` | use the relay from C-2, or the local model from C-1 |
+| `RELAY_TARGET is not set.` | the relay was not told where to connect | `$env:RELAY_TARGET = "https://your-endpoint/v1"` first |
+| `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | another relay is already running | use it, or stop it, or pass `-Port 8792` |
+| `LLM request returned HTTP 401` / `404` | wrong key / wrong endpoint or model name | check with `probe-endpoint.py` first |
+| the relay prints `key loaded : no` | the key file is not at `C:\FixIt\FixIt\.secrets\fixit_key` | see C-2 |
+| `tool_calls` is always empty, the model only returns text | the model does not support tool calling | use a model that supports function calling |
+| output looks like `鈺愨晲` or `鉁?` | the console is not UTF-8 | run `chcp 65001` |
+| running a `.ps1` says "running scripts is disabled on this system" | PowerShell blocks scripts by default | add `-ExecutionPolicy Bypass`, as in Step 4 |
+| `PATH` stops working after closing the window | environment variables are per-window | see Appendix B |
 
 ---
 
-## 附錄 A：為什麼要這樣做（原理）
+## Appendix A — why all this is necessary
 
-**為什麼要另外下載一個編譯器？**
-FixIt 的用途就是驅動一個真正的編譯器並解讀它的輸出，所以它自己需要一個 C++ 編譯器：
-一是拿來編譯 FixIt 本身，二是拿來當 FixIt 要驅動的那個編譯器。這裡用的是 winlibs 的
-MinGW-w64 GCC——免安裝、免管理員權限、解壓就能用，而且它的診斷格式是專案明確支援的。
+**Why download a separate compiler?**
+FixIt's purpose is to drive a real compiler and interpret its output, so it needs one
+both to build itself and to be the compiler it drives. The winlibs MinGW-w64 GCC needs no
+installation and no administrator rights, and its diagnostic format is one the project
+explicitly supports.
 
-**為什麼路徑一定要 ASCII？**
-gcc 會把自己安裝目錄下的函式庫路徑交給連結器 `ld`。路徑含中文時，這串位元組會被用本地
-代碼頁（例如 936/GBK）重新解讀，於是 `crt2.o`、`-lstdc++` 全部找不到，
-錯誤訊息還完全指不到真正的原因。放在 `C:\FixIt\toolchain` 就完全避開。
+**Why must the path be ASCII?**
+gcc passes the library paths under its own installation directory to the linker `ld`.
+With a non-ASCII path those bytes are re-decoded in the local code page (936/GBK on a
+Chinese Windows), so `crt2.o` and `-lstdc++` are all "not found" — and the error message
+never points at the real cause. `C:\FixIt\toolchain` avoids the whole class of problem.
 
-**為什麼 Windows 上的建置腳本不用專案的 `cmake`？**
-在這個環境試過，有兩個獨立問題：`ninja` 會永久卡住（它會讀子行程的輸出管道直到 EOF，
-而某些環境下那個管道不會關閉）；`mingw32-make` 會把 CMake 產生的 UTF-8 Makefile 當成
-本地編碼讀，遇到中文路徑就變成亂碼而找不到檔案。`build_fixit.ps1` 做的是完全相同的事
-（C 用 gcc、C++ 用 g++、專案程式碼開 `-Wall -Wextra -Werror`），只是不經過 CMake。
-Linux / macOS 使用者照專案 README 的 `cmake` 流程即可。
+**Why doesn't the Windows build use the project's `cmake`?**
+Two independent problems were hit here. `ninja` blocks forever: it reads each child's
+output pipe until EOF, and in some environments that pipe never closes. `mingw32-make`
+reads the UTF-8 Makefiles CMake writes in the local code page, so a non-ASCII path
+arrives as mojibake and every process launch fails. `build_fixit.ps1` does exactly what
+CMake would do — C via gcc, C++ via g++, the project's own `-Wall -Wextra -Werror` on its
+own code — just without CMake. Linux and macOS users can follow the project README's
+`cmake` flow.
 
-**為什麼要一個本機轉發器？**
-專案刻意不依賴 OpenSSL（決策 ADR-004），所以預設建置沒有 TLS 能力。
-轉發器用 Python 內建的憑證處理走 https，FixIt 端只說純 http。
-若你希望 FixIt 自己連 https，需要做一個帶 OpenSSL 的建置
-（`-DFIXIT_ENABLE_OPENSSL=ON`），並且在 Windows 上用 `FIXIT_CA_BUNDLE` 指定 CA 憑證包。
+**Why is there a local relay?**
+The project deliberately avoids an OpenSSL dependency (decision ADR-004), so the default
+build has no TLS. The relay uses Python's own certificate handling for https while FixIt
+speaks plain http. If you want FixIt itself to reach https, build with
+`-DFIXIT_ENABLE_OPENSSL=ON` and, on Windows, point `FIXIT_CA_BUNDLE` at a CA bundle.
 
-**為什麼要用 `--no-write`？**
-因為 FixIt 預設會直接改你的檔案。先看它打算怎麼改、確認沒問題再套用，比較安全。
+**Why `--no-write`?**
+Because FixIt repairs files in place by default. Looking at the intended change first,
+then applying it, is simply safer.
 
-## 附錄 B：把 PATH 設成永久（可選）
+## Appendix B — make PATH permanent (optional)
 
-不想每個新視窗都打那三行：
+So you do not have to type those three lines in every new window:
 
 ```powershell
 [Environment]::SetEnvironmentVariable(
@@ -426,38 +451,39 @@ Linux / macOS 使用者照專案 README 的 `cmake` 流程即可。
 [Environment]::SetEnvironmentVariable("FIXIT_TOOLCHAIN", "C:\FixIt\toolchain", "User")
 ```
 
-**要開新的 PowerShell 視窗才會生效。**（只改你這個使用者的設定，不動系統設定。）
+**Open a new PowerShell window for it to take effect.** (This changes only your own user
+settings, never the system ones.)
 
-## 附錄 C：全部指令速查
+## Appendix C — every command in one place
 
 ```powershell
-# ── 安裝（一次就好）─────────────────────────────
+# --- install (once) ---------------------------------------------------------
 New-Item -ItemType Directory -Force -Path C:\FixIt | Out-Null
 Set-Location C:\FixIt
 git clone https://github.com/wong060404/FixIt.git
 python C:\FixIt\FixIt\tools\windows\fetch_mingw.py
 powershell -ExecutionPolicy Bypass -File C:\FixIt\FixIt\tools\windows\build_fixit.ps1
 
-# ── 每個新視窗 ──────────────────────────────────
+# --- every new window -------------------------------------------------------
 chcp 65001 > $null
 $env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 
-# ── 找錯在哪 ────────────────────────────────────
+# --- find what is wrong -----------------------------------------------------
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\path\to\file.cpp"
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\path\to\file.cpp" --outline
 
-# ── 離線示範（只認四種錯誤）─────────────────────
+# --- offline demonstration (four fault shapes only) -------------------------
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\path\to\file.cpp" --agent --llm mock --verbose --no-write
 
-# ── 用本機模型修（Ollama，不用金鑰）─────────────
+# --- repair with a local model (Ollama, no key) -----------------------------
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\path\to\file.cpp" --agent --llm openai `
   --base-url http://127.0.0.1:11434/v1 --model qwen2.5-coder:7b --api-key ollama --verbose
 
-# ── 用雲端 API 修（需先開轉發器）────────────────
-python C:\FixIt\FixIt\tools\windows\probe-endpoint.py "https://你的端點/v1" "模型"
-$env:RELAY_TARGET = "https://你的端點/v1"
-python C:\FixIt\FixIt\tools\windows\llm-relay.py          # 視窗 A，保持開著
+# --- repair with your own cloud API (relay required) ------------------------
+python C:\FixIt\FixIt\tools\windows\probe-endpoint.py "https://your-endpoint/v1" "your-model"
+$env:RELAY_TARGET = "https://your-endpoint/v1"
+python C:\FixIt\FixIt\tools\windows\llm-relay.py          # window A, keep it open
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\path\to\file.cpp" --agent --llm openai `
-  --base-url http://127.0.0.1:8791/v1 --model "模型" --api-key relay --verbose --no-write
+  --base-url http://127.0.0.1:8791/v1 --model "your-model" --api-key relay --verbose --no-write
 ```

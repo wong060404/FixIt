@@ -1,3 +1,5 @@
+> **English** | [繁體中文](README.zh-TW.md)
+
 # FixIt
 
 **A C++ library + CLI that closes the loop between compiler output and an LLM's
@@ -8,6 +10,24 @@ patch a model *actually produces* — one with drifted line numbers, missing
 context, and whitespace that does not quite match — and when a patch cannot be
 applied it returns a structured explanation the model can act on, instead of an
 exit code.
+
+> **New here?** On Windows, start with
+> [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) ([中文](WINDOWS-SETUP.zh-TW.md)): clone, build
+> and repair your first file, with nothing installed system-wide.
+
+### Documentation
+
+Every prose document in this repository exists in English and Traditional Chinese
+(`.zh-TW`).
+
+| Document | English | 繁體中文 |
+|---|---|---|
+| Getting started on Windows: clone → build → run → repair a file | [WINDOWS-SETUP.md](WINDOWS-SETUP.md) | [WINDOWS-SETUP.zh-TW.md](WINDOWS-SETUP.zh-TW.md) |
+| This README | [README.md](README.md) | [README.zh-TW.md](README.zh-TW.md) |
+| Design decisions (ADRs) | [docs/decisions.md](docs/decisions.md) | [docs/decisions.zh-TW.md](docs/decisions.zh-TW.md) |
+| Wiki outline | [docs/wiki_outline.md](docs/wiki_outline.md) | [docs/wiki_outline.zh-TW.md](docs/wiki_outline.zh-TW.md) |
+| Compiler fixtures | [tests/fixtures/compiler/README.md](tests/fixtures/compiler/README.md) | [tests/fixtures/compiler/README.zh-TW.md](tests/fixtures/compiler/README.zh-TW.md) |
+| Recorded demo transcript | [docs/demo_output.txt](docs/demo_output.txt) | — (byte-exact program output, asserted by the test suite) |
 
 ---
 
@@ -53,12 +73,14 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 
 > **Windows:** nothing has to be installed system-wide. A portable MinGW-w64 GCC is
 > fetched by `python tools\windows\fetch_mingw.py`, and
-> `tools\windows\build_fixit.ps1` builds the same two binaries without CMake (the
-> CMake generators cannot be used here — see the script header for why). Follow
-> [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) for a step-by-step guide, in Chinese, that
-> starts from a bare Windows machine. Two helper scripts cover the model backends:
-> `tools\windows\llm-relay.py` reaches https endpoints from this TLS-less build,
-> and `tools\windows\probe-endpoint.py` checks an endpoint, key and model before a
+> `tools\windows\build_fixit.ps1` builds the same two binaries without CMake (the CMake
+> generators cannot be used here — see the script header for why). Follow
+> [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) (or
+> [`WINDOWS-SETUP.zh-TW.md`](WINDOWS-SETUP.zh-TW.md) 中文版) for a step-by-step guide
+> that starts from a bare Windows machine and ends with a repaired file, using either a
+> local model or your own OpenAI-compatible endpoint. Two helper scripts cover the model
+> backends: `tools\windows\llm-relay.py` reaches https endpoints from this TLS-less
+> build, and `tools\windows\probe-endpoint.py` checks an endpoint, key and model before a
 > run.
 
 Then run the section-0 acceptance command:
