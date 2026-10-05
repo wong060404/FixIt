@@ -124,8 +124,10 @@ single `.cpp` in isolation, which cannot work here:
 * `src/*.cpp` and `tests/*.cpp` need the CMake-provided include paths (Catch2,
   tree-sitter, `httplib`), so a lone `clang++ file.cpp` fails with
   `'catch2/catch_test_macros.hpp' file not found`.
-* `examples/buggy/*.cpp` are **intentionally broken** fixtures — a failed compile
-  is their designed behaviour, not an environment problem.
+* `examples/buggy/e1`–`e3` are **intentionally broken** fixtures — a failed compile
+  is their designed behaviour, not an environment problem. `e4_testing.cpp` is a
+  scratch file kept from manual testing; it compiles cleanly and no test or demo
+  references it.
 
 If `F5` ever reports *"Errors exist after running preLaunchTask"*, run
 `cmake: build` once and read the compile output: it is a real compiler error, or
@@ -524,7 +526,8 @@ fixit/
 ├── tools/{fixit_with_my_key.sh,push_to_github.sh}
 ├── tests/{patch_golden,compiler,codemap,agent_mock,expected_artifacts,cli_contract}.test.cpp
 ├── tests/fixtures/{compiler,codemap}/
-├── examples/buggy/{e1_missing_include,e2_drift,e3_type_error,e4_testing}.cpp
+├── examples/buggy/{e1_missing_include,e2_drift,e3_type_error}.cpp
+├── examples/buggy/e4_testing.cpp       # scratch file from manual testing; not a fixture
 ├── examples/buggy/expected/             # repaired content + trajectories
 ├── docs/{decisions.md,demo_output.txt,patch_success_matrix.json,wiki_outline.md}
 ├── docs/patch_success_heatmap*.svg      # three heat maps rendered from the matrix
