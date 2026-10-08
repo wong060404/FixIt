@@ -52,6 +52,8 @@ FixIt 把這個循環閉合起來：
 | re-verify | 重新編譯；只有編譯器能判定修復是否成功 |
 | on failure | 回傳 `score`、最接近的相符位置、真正不同的那一行，以及建議重新讀取的範圍 |
 
+![FixIt 修復迴圈：compile → locate → LLM patch → fuzzy apply → re-verify，失敗時把結構化報告回饋到下一個提示](docs/repair-loop.svg)
+
 ## 2. 創新之處
 
 1. **模糊修補引擎（fuzzy patch engine）。** 每個候選位置都會被評分
@@ -511,14 +513,26 @@ roadmap 中。
 
 四種缺陷在每一列中都存在 —— 精確、行尾空白、缺少上下文與多餘上下文 —— 因此
 一個格子代表的就是該種缺陷在該漂移量下的比率。
-該漂移量下的比率，就是該格子的數字。
+
+同樣的數據畫成熱度圖：列是四種缺陷，欄是宣告位置的漂移量，每個格子 200 次試驗。
+
+**Unique lines, 3 context lines** —— 本專案所主張的能力
+
+![FixIt patch apply rate，unique-line 語料庫：四種缺陷在 ±20 行漂移內皆為 100%](docs/patch_success_heatmap.svg)
+
+**Repeated boilerplate around a unique changed line** —— 貼近現實的漂移
+
+![FixIt patch apply rate，shared-context 語料庫：四種缺陷在 ±20 行漂移內皆為 100%](docs/patch_success_heatmap_shared_context.svg)
+
+**Every block byte-identical** —— 誠實的極限
+
+![FixIt patch apply rate，ambiguous 語料庫：超過 ±2 行漂移後成功率崩落，因為上下文無法辨識目標](docs/patch_success_heatmap_ambiguous.svg)
 
 前兩列是本專案所主張的能力。第三列則是它誠實的極限：當上下文與好幾個位置同樣
 相符，*而且*宣告的位置又是錯的，就沒有演算法能還原意圖 —— FixIt 會套用到最接近
 的候選位置，而掃描會把它計為一次失誤。見
 [`docs/wiki_outline.md`](docs/wiki_outline.md) 與
 [`docs/patch_success_matrix.json`](docs/patch_success_matrix.json)。
-完整的數據見 docs/patch_success_matrix.json。
 
 ## 9. 路線圖
 

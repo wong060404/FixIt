@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="470" viewBox="0 0 1400 470" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#888888"/>
+    </marker>
+    <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#efb32c"/>
+    </marker>
+    <marker id="ar-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2e7d32"/>
+    </marker>
+  </defs>
+
+  <rect width="1400" height="470" fill="#ffffff"/>
+
+  <text x="40" y="44" font-size="22" font-weight="600" fill="#111111">FixIt &#8212; the repair loop</text>
+  <text x="40" y="70" font-size="13" fill="#555555">Success is set by a clean compile, never by the model claiming it is done.</text>
+
+  <!-- boxes -->
+  <g>
+    <rect x="40" y="110" width="190" height="120" rx="10" fill="#fbfbfb" stroke="#cfcfcf" stroke-width="1.5"/>
+    <text x="135" y="145" font-size="15" font-weight="600" fill="#111111" text-anchor="middle">1 &#183; compile</text>
+    <text x="135" y="174" font-size="11.5" fill="#555555" text-anchor="middle">run the real compiler;</text>
+    <text x="135" y="192" font-size="11.5" fill="#555555" text-anchor="middle">diagnostics parsed into</text>
+    <text x="135" y="210" font-size="11.5" fill="#555555" text-anchor="middle">data, not text</text>
+  </g>
+  <g>
+    <rect x="272" y="110" width="190" height="120" rx="10" fill="#fbfbfb" stroke="#cfcfcf" stroke-width="1.5"/>
+    <text x="367" y="145" font-size="15" font-weight="600" fill="#111111" text-anchor="middle">2 &#183; locate</text>
+    <text x="367" y="174" font-size="11.5" fill="#555555" text-anchor="middle">diagnostic &#8594; enclosing</text>
+    <text x="367" y="192" font-size="11.5" fill="#555555" text-anchor="middle">function, plus a</text>
+    <text x="367" y="210" font-size="11.5" fill="#555555" text-anchor="middle">numbered snippet</text>
+  </g>
+  <g>
+    <rect x="504" y="110" width="190" height="120" rx="10" fill="#fbfbfb" stroke="#cfcfcf" stroke-width="1.5"/>
+    <text x="599" y="145" font-size="15" font-weight="600" fill="#111111" text-anchor="middle">3 &#183; LLM patch</text>
+    <text x="599" y="174" font-size="11.5" fill="#555555" text-anchor="middle">the model proposes</text>
+    <text x="599" y="192" font-size="11.5" fill="#555555" text-anchor="middle">a diff &#8212; hosted model</text>
+    <text x="599" y="210" font-size="11.5" fill="#555555" text-anchor="middle">or the offline mock</text>
+  </g>
+  <g>
+    <rect x="736" y="110" width="190" height="120" rx="10" fill="#fbfbfb" stroke="#cfcfcf" stroke-width="1.5"/>
+    <text x="831" y="145" font-size="15" font-weight="600" fill="#111111" text-anchor="middle">4 &#183; fuzzy apply</text>
+    <text x="831" y="174" font-size="11.5" fill="#555555" text-anchor="middle">score every candidate;</text>
+    <text x="831" y="192" font-size="11.5" fill="#555555" text-anchor="middle">window ladder &#177;0&#8594;&#177;50;</text>
+    <text x="831" y="210" font-size="11.5" fill="#555555" text-anchor="middle">gate at score &#8805; 0.80</text>
+  </g>
+  <g>
+    <rect x="968" y="110" width="190" height="120" rx="10" fill="#fbfbfb" stroke="#cfcfcf" stroke-width="1.5"/>
+    <text x="1063" y="145" font-size="15" font-weight="600" fill="#111111" text-anchor="middle">5 &#183; re-verify</text>
+    <text x="1063" y="174" font-size="11.5" fill="#555555" text-anchor="middle">recompile &#8212; the exit</text>
+    <text x="1063" y="192" font-size="11.5" fill="#555555" text-anchor="middle">code alone decides</text>
+    <text x="1063" y="210" font-size="11.5" fill="#555555" text-anchor="middle">whether the loop stops</text>
+  </g>
+
+  <!-- forward arrows -->
+  <line x1="232" y1="170" x2="268" y2="170" stroke="#888888" stroke-width="1.8" marker-end="url(#ar)"/>
+  <line x1="464" y1="170" x2="500" y2="170" stroke="#888888" stroke-width="1.8" marker-end="url(#ar)"/>
+  <line x1="696" y1="170" x2="732" y2="170" stroke="#888888" stroke-width="1.8" marker-end="url(#ar)"/>
+  <line x1="928" y1="170" x2="964" y2="170" stroke="#888888" stroke-width="1.8" marker-end="url(#ar)"/>
+
+  <!-- success path -->
+  <line x1="1160" y1="170" x2="1206" y2="170" stroke="#2e7d32" stroke-width="1.8" marker-end="url(#ar-green)"/>
+  <rect x="1210" y="136" width="170" height="68" rx="34" fill="#e8f5e9" stroke="#2e7d32" stroke-width="1.5"/>
+  <text x="1295" y="166" font-size="15" font-weight="600" fill="#2e7d32" text-anchor="middle">success</text>
+  <text x="1295" y="186" font-size="11" fill="#4a7c4e" text-anchor="middle">clean exit &#183; stop</text>
+
+  <!-- failure feedback loop -->
+  <path d="M 1063 232 V 392 H 599 V 236" fill="none" stroke="#efb32c" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#ar-amber)"/>
+  <rect x="618" y="356" width="452" height="30" rx="8" fill="#fff9ec" stroke="#efb32c" stroke-width="1.2"/>
+  <text x="844" y="376" font-size="12.5" font-weight="600" fill="#9a6f10" text-anchor="middle">structured failure &#8594; fed into the next prompt</text>
+  <text x="844" y="415" font-size="11" fill="#777777" text-anchor="middle">score &#183; closest match &#183; the exact line that differed &#183; a suggested re-read</text>
+
+  <text x="40" y="445" font-size="12" fill="#555555">On failure the hunk is refused with an explanation the model can act on, instead of an exit code.</text>
+</svg>

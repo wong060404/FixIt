@@ -52,6 +52,8 @@ FixIt closes that circle:
 | re-verify | recompiles; only the compiler decides whether the repair worked |
 | on failure | returns `score`, the closest match, the exact line that differed, and a suggested re-read |
 
+![FixIt repair loop: compile to locate to LLM patch to fuzzy apply to re-verify, with a structured failure report feeding back into the next prompt](docs/repair-loop.svg)
+
 ## 2. Innovation
 
 1. **Fuzzy patch engine.** Every candidate position is scored
@@ -515,6 +517,21 @@ maps under `docs/`. Current numbers (200 trials per cell):
 All four impairments are present in every row — exact, trailing whitespace,
 missing context and extra context — so a cell is the rate for that impairment at
 that drift.
+
+The same numbers as heat maps: rows are the four impairments, columns are the
+declared-position drift, and 200 trials were run per cell.
+
+**Unique lines, 3 context lines** — the claim the project makes
+
+![FixIt patch apply rate, unique-line corpus: every impairment holds at 100% out to ±20 lines of drift](docs/patch_success_heatmap.svg)
+
+**Repeated boilerplate around a unique changed line** — realistic drift
+
+![FixIt patch apply rate, shared-context corpus: every impairment holds at 100% out to ±20 lines of drift](docs/patch_success_heatmap_shared_context.svg)
+
+**Every block byte-identical** — the honest limit
+
+![FixIt patch apply rate, ambiguous corpus: success collapses beyond ±2 lines of drift because the context cannot identify the target](docs/patch_success_heatmap_ambiguous.svg)
 
 The first two rows are the claim the project makes. The third row is its honest
 limit: when the context matches several places equally well *and* the declared
