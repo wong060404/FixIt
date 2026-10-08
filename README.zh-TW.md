@@ -2,6 +2,10 @@
 
 # FixIt
 
+[![ci](https://github.com/wong060404/FixIt/actions/workflows/ci.yml/badge.svg)](https://github.com/wong060404/FixIt/actions/workflows/ci.yml)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](#requirements)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **一套 C++ 函式庫 + CLI，把編譯器輸出與 LLM 的
 patches 串成一個閉環：compile → locate → LLM patch → fuzzy apply → re-verify。**
 
@@ -531,16 +535,6 @@ roadmap 中。
   recipe，讓使用端不必自己建置 tree-sitter。
 * **Demo 影片** —— 逐字稿已錄製且可重現
   （`tools/record_demo.sh`）；螢幕錄影則尚未製作。
-
-## 10. 團隊與工作分工
-
-| 成員（git 帳號） | 模組 / 產出 |
-|---|---|
-| _fill in_ | `Compiler` + 編譯器 fixture（`src/compiler.cpp`、`tests/compiler.test.cpp`） |
-| _fill in_ | `CodeMap` + 範例（`src/codemap.cpp`、`tests/codemap.test.cpp`） |
-| _fill in_ | `PatchEngine` + 黃金 patch（`src/patch.cpp`、`tests/patch_golden.test.cpp`） |
-| _fill in_ | `Agent` + LLM 後端 + CLI（`src/agent.cpp`、`src/*_llm.cpp`、`tools/fixit-cli/`） |
-| _fill in_ | CI、文件、Wiki、demo 影片（`.github/workflows/ci.yml`、`docs/`、`README.md`） |
 
 ## 版面配置
 

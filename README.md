@@ -2,6 +2,10 @@
 
 # FixIt
 
+[![ci](https://github.com/wong060404/FixIt/actions/workflows/ci.yml/badge.svg)](https://github.com/wong060404/FixIt/actions/workflows/ci.yml)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](#requirements)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **A C++ library + CLI that closes the loop between compiler output and an LLM's
 patches: compile → locate → LLM patch → fuzzy apply → re-verify.**
 
@@ -534,16 +538,6 @@ nearest candidate, which the sweep counts as a miss. See
   recipes, so consumers do not build tree-sitter themselves.
 * **Demo video** — the transcript is recorded and reproducible
   (`tools/record_demo.sh`); the screen recording is not made yet.
-
-## 10. Team & Division of Work
-
-| Member (git account) | Module / artefact |
-|---|---|
-| _fill in_ | `Compiler` + compiler fixtures (`src/compiler.cpp`, `tests/compiler.test.cpp`) |
-| _fill in_ | `CodeMap` + samples (`src/codemap.cpp`, `tests/codemap.test.cpp`) |
-| _fill in_ | `PatchEngine` + golden patches (`src/patch.cpp`, `tests/patch_golden.test.cpp`) |
-| _fill in_ | `Agent` + LLM backends + CLI (`src/agent.cpp`, `src/*_llm.cpp`, `tools/fixit-cli/`) |
-| _fill in_ | CI, docs, Wiki, demo video (`.github/workflows/ci.yml`, `docs/`, `README.md`) |
 
 ## Layout
 
