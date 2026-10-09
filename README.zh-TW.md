@@ -16,12 +16,13 @@ patch 套用不上時，它回傳的是模型可以據以行動的結構化說�
 
 ### 看它怎麼運作
 
-[![FixIt —— AI 寫出正確的修正，patch 工具卻仍然拒絕它](docs/fixit_teaser.gif)](docs/fixit_intro_subs.mp4)
+[![FixIt 32 秒導覽 —— 開場、結構化失敗報告，以及實測數據](docs/fixit_tour.gif)](docs/fixit_intro_subs.mp4)
 
-**▶ [觀看 4 分鐘介紹影片](docs/fixit_intro_subs.mp4)** · [英文字幕](docs/fixit_intro.srt)
+**▶ [觀看完整 4 分鐘介紹影片](docs/fixit_intro_subs.mp4)** · [英文字幕](docs/fixit_intro.srt)
 
-影片開頭就是整個專案存在的理由：模型的 diff 是對的，`patch(1)` 卻只回傳一個
-結束碼。以下所有內容，都是為了把這個閉環補起來。
+上方是整支影片的 32 秒無聲導覽，取自有旁白的完整版本。影片開頭就是這個專案存在的
+理由：模型的 diff 是對的，`patch(1)` 卻只回傳一個結束碼。以下所有內容，都是為了把
+這個閉環補起來。
 
 > **第一次來嗎？** 在 Windows 上，請從
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md)（[中文](WINDOWS-SETUP.zh-TW.md)）開始：clone、建置

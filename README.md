@@ -17,12 +17,13 @@ exit code.
 
 ### See it working
 
-[![FixIt — an AI writes a correct fix for your C++ bug, and the patch tool still fails it](docs/fixit_teaser.gif)](docs/fixit_intro_subs.mp4)
+[![FixIt in 32 seconds — the hook, the structured failure report, and the measured results](docs/fixit_tour.gif)](docs/fixit_intro_subs.mp4)
 
-**▶ [Watch the 4-minute introduction](docs/fixit_intro_subs.mp4)** · [English subtitles](docs/fixit_intro.srt)
+**▶ [Watch the full 4-minute introduction](docs/fixit_intro_subs.mp4)** · [English subtitles](docs/fixit_intro.srt)
 
-The video opens on the problem the whole project exists to solve: the model's diff
-is correct, and `patch(1)` refuses it with an exit code. Everything below follows
+Above is a silent 32-second tour of the whole film, sampled from the narrated
+version. It opens on the problem the project exists to solve: the model's diff is
+correct, and `patch(1)` refuses it with an exit code. Everything below follows
 from closing that loop.
 
 > **New here?** On Windows, start with
