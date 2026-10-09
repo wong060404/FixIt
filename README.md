@@ -15,6 +15,16 @@ context, and whitespace that does not quite match — and when a patch cannot be
 applied it returns a structured explanation the model can act on, instead of an
 exit code.
 
+### See it working
+
+[![FixIt — an AI writes a correct fix for your C++ bug, and the patch tool still fails it](docs/fixit_teaser.gif)](docs/fixit_intro_subs.mp4)
+
+**▶ [Watch the 4-minute introduction](docs/fixit_intro_subs.mp4)** · [English subtitles](docs/fixit_intro.srt)
+
+The video opens on the problem the whole project exists to solve: the model's diff
+is correct, and `patch(1)` refuses it with an exit code. Everything below follows
+from closing that loop.
+
 > **New here?** On Windows, start with
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) ([中文](WINDOWS-SETUP.zh-TW.md)): clone, build
 > and repair your first file, with nothing installed system-wide.
@@ -32,6 +42,7 @@ Every prose document in this repository exists in English and Traditional Chines
 | Wiki outline | [docs/wiki_outline.md](docs/wiki_outline.md) | [docs/wiki_outline.zh-TW.md](docs/wiki_outline.zh-TW.md) |
 | Compiler fixtures | [tests/fixtures/compiler/README.md](tests/fixtures/compiler/README.md) | [tests/fixtures/compiler/README.zh-TW.md](tests/fixtures/compiler/README.zh-TW.md) |
 | Recorded demo transcript | [docs/demo_output.txt](docs/demo_output.txt) | — (byte-exact program output, asserted by the test suite) |
+| Introduction video (4 min, subtitled) | [docs/fixit_intro_subs.mp4](docs/fixit_intro_subs.mp4) | — (English subtitles: [docs/fixit_intro.srt](docs/fixit_intro.srt)) |
 
 ---
 
@@ -553,8 +564,9 @@ nearest candidate, which the sweep counts as a miss. See
   `compile_commands.json` would also remove the need to pass `-I` by hand.
 * **Packaging** — `install()`/export rules and a package config, then vcpkg/Conan
   recipes, so consumers do not build tree-sitter themselves.
-* **Demo video** — the transcript is recorded and reproducible
-  (`tools/record_demo.sh`); the screen recording is not made yet.
+* **Demo video** — [published](docs/fixit_intro_subs.mp4). It is generated from
+  the same recorded transcript, so it cannot drift from
+  `docs/demo_output.txt`.
 
 ## Layout
 

@@ -13,7 +13,15 @@ FixIt 並不是另一個包裝 `patch(1)` 的工具。它的修補引擎是為�
 patch 而打造 —— 那種行號已經漂移、缺少上下文、空白又對不齊的 patch —— 而當
 patch 套用不上時，它回傳的是模型可以據以行動的結構化說明，而不是一個
 結束碼。
-> **第一次來嗎？** 在 Windows 上，請從
+
+### 看它怎麼運作
+
+[![FixIt —— AI 寫出正確的修正，patch 工具卻仍然拒絕它](docs/fixit_teaser.gif)](docs/fixit_intro_subs.mp4)
+
+**▶ [觀看 4 分鐘介紹影片](docs/fixit_intro_subs.mp4)** · [英文字幕](docs/fixit_intro.srt)
+
+影片開頭就是整個專案存在的理由：模型的 diff 是對的，`patch(1)` 卻只回傳一個
+結束碼。以下所有內容，都是為了把這個閉環補起來。
 
 > **第一次來嗎？** 在 Windows 上，請從
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md)（[中文](WINDOWS-SETUP.zh-TW.md)）開始：clone、建置
@@ -32,6 +40,7 @@ patch 套用不上時，它回傳的是模型可以據以行動的結構化說�
 | Wiki 大綱 | [docs/wiki_outline.md](docs/wiki_outline.md) | [docs/wiki_outline.zh-TW.md](docs/wiki_outline.zh-TW.md) |
 | 編譯器 fixture | [tests/fixtures/compiler/README.md](tests/fixtures/compiler/README.md) | [tests/fixtures/compiler/README.zh-TW.md](tests/fixtures/compiler/README.zh-TW.md) |
 | 錄製的 demo 逐字稿 | [docs/demo_output.txt](docs/demo_output.txt) | —（程式輸出的位元完全一致版本，由測試套件斷言） |
+| 介紹影片（4 分鐘，含字幕） | [docs/fixit_intro_subs.mp4](docs/fixit_intro_subs.mp4) | —（英文字幕：[docs/fixit_intro.srt](docs/fixit_intro.srt)） |
 
 ---
 
@@ -547,8 +556,8 @@ roadmap 中。
   `compile_commands.json` 也能免去手動傳入 `-I` 的需要。
 * **打包** —— `install()`/export 規則與一份 package config，接著是 vcpkg/Conan
   recipe，讓使用端不必自己建置 tree-sitter。
-* **Demo 影片** —— 逐字稿已錄製且可重現
-  （`tools/record_demo.sh`）；螢幕錄影則尚未製作。
+* **Demo 影片** —— [已發佈](docs/fixit_intro_subs.mp4)。它是由同一份錄製逐字稿
+  產生，因此不會與 `docs/demo_output.txt` 產生落差。
 
 ## 版面配置
 
