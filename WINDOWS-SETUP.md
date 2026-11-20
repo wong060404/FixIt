@@ -49,6 +49,47 @@ portable GCC for you; you do not need Visual Studio.
 
 ---
 
+## Fast path — a clone that builds itself
+
+If a C++ compiler is already installed (MSYS2, or anything that puts `g++` on `PATH`),
+**Part 1 is optional**. The repository ships a launcher that builds the tool on first
+use, finds the compiler itself, and runs it:
+
+```powershell
+git clone https://github.com/wong060404/FixIt.git
+Set-Location FixIt
+.\setup.cmd        # once per machine; idempotent
+
+fixit.cmd examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write
+```
+
+`setup.cmd` finds (or offers to download) a compiler, builds into `build-win\` (about a
+minute the first time), and registers `fixit.cmd` so it works from **any** folder
+afterwards. Re-running it is harmless: an up-to-date build is reused. If you prefer not
+to register anything, run `fixit.cmd` from inside the checkout instead — nothing else
+needs to be set up: no `PATH` edit by hand, no environment variable, no `chcp`, no
+CMake, and the checkout may live in any folder on any drive.
+
+The launcher also does three things the tool cannot do for itself: it switches the
+console to UTF-8 for the duration of the run (and restores the previous code page
+afterwards), it puts the discovered compiler on `PATH` for fixit only, and it refuses a
+non-ASCII file argument up front with the two commands that do work.
+
+| Launcher-only flag | Effect |
+|---|---|
+| `--fixit-rebuild` | rebuild even when `build-win` is up to date |
+| `--fixit-fetch-toolchain` | download the portable MinGW GCC first (Step 3), then build |
+
+In `cmd.exe`, use `fixit.cmd` with the same arguments. The file being repaired may sit
+in any other project folder, under any folder name, including one with spaces.
+
+> **Non-ASCII paths.** Pass an ASCII path. A file argument containing Chinese
+> characters cannot reach this build (the C++ runtime receives the console code page,
+> not UTF-8). Running from the file's own folder with a relative name does work, and the
+> launcher prints exactly that when it rejects the argument.
+
+---
+
 ## Part 1 — Install (do this once)
 
 ### Step 1: check Git and Python
@@ -213,6 +254,12 @@ complete repair loop:
 
 ## Part 2 — Using it
 
+The file argument does not have to be a full path: `fixit.cmd lab3.cpp` looks in your
+user folders (Downloads, Desktop, Documents), `Downloads\lab3.cpp` is relative to your home
+folder, and `~/Downloads/lab3.cpp` works too. When fixit has to guess it says which file it
+picked (`fixit: using '…'`), and when a name matches several files it refuses and lists
+them.
+
 In every new PowerShell window, run these three lines first (or make them permanent, see
 Appendix B):
 
@@ -227,6 +274,11 @@ $env:NO_COLOR = "1"
 | `chcp 65001` | switches the console to UTF-8; without it FixIt's box-drawing characters show as mojibake like `鈺愨晲` (cosmetic only) |
 | `PATH` | lets fixit find `g++`. Alternatively pass `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` every time |
 | `NO_COLOR` | turns off colour so output is easier to copy |
+
+> **Running it from another folder.** Install the command once with
+> `powershell -ExecutionPolicy Bypass -File tools\windows\install-command.ps1`; after
+> that, any new window can `cd` into a project and run `fixit.cmd main.cpp` even though
+> the checkout lives somewhere else. `-Remove` undoes it.
 
 ### Use A: just find out what is wrong (fastest, no model)
 
@@ -393,7 +445,9 @@ Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` intern
 | `fetch_mingw.py` says the destination contains non-ASCII | the work path has Chinese characters | use `C:\FixIt` and clone again |
 | `No such file or directory`, `cannot find -lstdc++` while building | the toolchain sits under a non-ASCII path | move the whole `C:\FixIt` to a plain ASCII path |
 | `compiler not found. Looked in: ...` | the compiler has not been downloaded | do Step 3 |
-| `the compiler could not be executed (exit code 127)` | `g++` is not on PATH and `--compiler` was not given | run the three lines at the top of Part 2 |
+| `the compiler could not be executed (exit code 127)` | `g++` is not on PATH | run the three lines at the top of Part 2, or use `.\fixit.cmd`, which puts the compiler on PATH for you |
+| `the compiler exited 1 without reporting a diagnostic for this file` | the compiler started but could not run its own tools (`as.exe`); MSYS2's gcc finds them through PATH, so an absolute `--compiler` path is not enough | put the compiler's `bin` folder on PATH, or use `.\fixit.cmd` |
+| `fixit: cannot create the --no-write scratch copy ... Permission denied` | every writable home failed (`TEMP`, `%LOCALAPPDATA%\fixit`, the program's folder, the source folder, the current folder) — usually Windows' Controlled Folder Access or an antivirus blocking this unsigned program | the first writable one is now used automatically; if all are blocked, run without `--no-write`, or allow `fixit.exe` under Windows Security → Virus & threat protection → Ransomware protection → Controlled folder access |
 | `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` points straight at `https://` | use the relay from C-2, or the local model from C-1 |
 | `RELAY_TARGET is not set.` | the relay was not told where to connect | `$env:RELAY_TARGET = "https://your-endpoint/v1"` first |
 | `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | another relay is already running | use it, or stop it, or pass `-Port 8792` |

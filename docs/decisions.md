@@ -740,3 +740,235 @@ to notice than a missing flag.  Explicit flags keep one source of truth.
     fixit src/parser.cpp -Iinclude --agent --llm openai ...
 
 with `-I` matching whatever the project already uses.
+---
+
+## ADR-030 — The clone builds itself; the compiler is discovered, not configured
+
+**Context.** A fresh clone was not runnable.  The CMake flow needs a `cmake` the
+machine may not have (this Windows host does not), and the Windows flow required
+three prepended environment lines plus a toolchain at a path fixed relative to the
+checkout (`<repo parent>\toolchain\mingw\mingw64\bin`), so a clone in any other
+layout failed with `compiler not found`.  The guide also assumed the checkout lives
+at `C:\FixIt`.  Every one of those is environment work the user has to know about
+before the first run, which is exactly the question a clone should not raise.
+
+**Decision.** Two root launchers (`fixit.ps1` for PowerShell, `fixit.cmd` for
+`cmd.exe`) become the documented Windows entry point.  They resolve everything from
+`$PSScriptRoot`, build into the git-ignored `build-win\` when the binary is missing
+or older than any source, and forward every argument unchanged.  Compiler discovery
+lives in `tools\windows\fixit-env.ps1` and is dot-sourced by `build_fixit.ps1` too,
+so the launcher and the build cannot disagree; `build_fixit.ps1` also accepts
+`-CompilerBin`.  The search order is: `-CompilerBin`, `$env:FIXIT_TOOLCHAIN`,
+`<repo parent>\toolchain`, `%TEMP%\fixit-toolchain`, a `g++` already on `PATH`, and
+finally `C:\msys64\{ucrt64,mingw64,mingw32}\bin`.
+
+Two behaviours were added to the build script itself:
+
+* it prepends the chosen compiler directory to `PATH` **for its own process only**,
+  because MSYS2's `gcc.exe` finds `as.exe`/`ld.exe` through `PATH` and, invoked by
+  absolute path with its bin directory absent, exits `1` without printing anything
+  (measured; the identical command succeeds once the directory is back on `PATH`);
+* the launcher switches the console to UTF-8 and restores the previous code page
+  afterwards, because the tool draws its status characters with UTF-8 bytes.
+
+**Alternatives rejected.** Committing a prebuilt `fixit.exe` would make `git clone`
+a download rather than a source checkout, and a checked-in binary cannot be reviewed
+or diffed; releases are the right home for that and are already on the roadmap.
+Downloading the 274 MB portable toolchain automatically on first run was rejected as
+a silent network side effect: it is an explicit `--fixit-fetch-toolchain` flag.
+
+**Consequence.** `git clone` → `.\fixit.ps1 <file>` is the entire setup on a machine
+that already has a C++ compiler, and the flag above covers one that has none.  The
+checkout may live anywhere, and the repaired file may live in any other project
+folder, including a name containing spaces — verified from an unrelated working
+directory with no `g++` on `PATH`.
+
+**Known limit, recorded rather than hidden.** A file argument containing non-ASCII
+characters is refused by the launcher instead of being left to crash: `main` receives
+the console code page (GBK, for example), `std::filesystem` then throws `Cannot
+convert character sequence: Illegal byte sequence`, and the CLI exits `3`.  Running
+from the file's own folder with a relative name works, because the argument is then
+ASCII, and the launcher prints those two commands.  Making non-ASCII arguments work
+end to end needs UTF-8 `argv` plus UTF-8 file I/O in `CodeMap`/`Agent` — a library
+change, not a launcher one.
+
+---
+
+## ADR-031 — A compile failure with zero diagnostics has to explain itself
+
+**Context.** When the compiler exits non-zero without emitting a single diagnostic, the
+CLI used to print `✗ 0 errors` and the loop ended with `Not fixed`.  On Windows this
+happens whenever MSYS2's `gcc.exe` starts but cannot find `as.exe`, because it resolves
+its own sub-tools through `PATH` rather than through its executable location.  A user hit
+this and reasonably concluded the program was broken: both lines are individually true
+and jointly tell nobody anything, and no diagnostic is shown because the compiler never
+got as far as parsing the file.
+
+**Decision.** When a compile is not clean and `error_count() == 0`, the CLI now prints the
+exit status, a hint naming the likely cause (`as.exe`/`ld.exe` not runnable), and the
+captured `raw_output` whenever there is any.  The three places that print a compile
+result -- compile-only mode, a repair round, and the terminal verification -- share one
+helper, so they cannot drift apart.  The documentation is corrected accordingly:
+`--compiler <full path>` is **not** sufficient on its own for MSYS2, because the
+compiler's `bin` directory still has to be on `PATH`; `tools\windows\fixit-env.ps1` plus
+the launcher do that automatically (ADR-030).
+
+**Rationale.** The exit code contract already distinguishes "not repaired" (`1`) from
+"could not run the compiler" (`127`), but that distinction is invisible in the transcript
+a user actually reads.  A message that names the cause converts a dead end into a
+one-line fix, which is the same principle as the structured failure report of ADR-002:
+the failure case has to carry as much information as the success case.
+
+**Consequence.** Reproduced and verified by removing the compiler from `PATH`: the old
+output was `✗ 0 errors`; the new output is `✗ the compiler could not be executed`
+(exit `127`) or `✗ the compiler exited 1 without reporting a diagnostic for this file`
+(exit `1`), each followed by the hint and, when present, the compiler's own output.
+
+---
+
+## ADR-032 — `--no-write` scratch copies are unique, verified, and fall back
+
+**Context.** `--no-write` copies the target into `%TEMP%\fixit-no-write-<pid>` and the
+copy's `error_code` was ignored. When the copy could not be made — a read-only or full
+temp folder, a lock, or a directory left behind by an interrupted run — the compiler was
+handed a path that did not exist and reported `fatal error: ... No such file or
+directory`. After ADR-031 the message at least explained itself, but nothing in it said
+"temporary folder", and the exit code was `1` ("not repaired") rather than "could not
+prepare the run".
+
+**Decision.** The scratch copy is now created by one function that
+
+* names the directory `fixit-no-write-<pid>-<steady-clock ticks>`, so a directory left
+  behind by an interrupted or crashed run can never be reused;
+* checks every filesystem call and verifies that the copy is a regular file;
+* falls back to a private directory next to the source file when the system temp folder
+  cannot be used (that copy is removed when the run ends, like the first one);
+* reports the OS error and exits `2` when neither location works, instead of compiling a
+  file that is not there.
+
+**Rationale.** The success path stays byte-identical, which the demo transcript and the
+`expected_artifacts` test depend on; only the failure path changes. This is the same rule
+as ADR-002 and ADR-031: when something cannot be done, say which thing and why.
+
+**Consequence.** Verified on this machine: a normal run is unchanged; with `TMP`/`TEMP`
+pointing at an unmounted drive the run succeeds through the fallback and leaves no scratch
+directory behind.
+
+---
+
+## ADR-033 — The file argument is resolved, not just opened
+
+**Context.** Users describe files the way they see them (`newtest.cpp`,
+`Downloads\newtest.cpp`) or paste an almost-right path (`C:\Users\Downloads\...`
+instead of `C:\Users\<name>\Downloads\...`).  The CLI answered `is not a readable
+file` with exit `2` — correct, but it forces the caller to build an absolute path by
+hand, which is exactly the environment knowledge a tool should not require.
+
+**Decision.** Before validating the argument, the CLI resolves it once:
+
+* strip one layer of surrounding quotes, expand a leading `~` and `%VARS%`;
+* use the literal path when it exists;
+* otherwise try the path, and then its file name, inside `%USERPROFILE%`/`$HOME` and
+  their `Downloads`, `Desktop`, `Documents`, `OneDrive\Desktop`, `OneDrive\Documents`;
+* exactly one match → print `fixit: using '…' (resolved from '…')` on stdout and use it;
+* several matches → print the candidates and fail with exit `2`, because repairing the
+  wrong file silently would be worse than an error;
+* no match → keep the existing `is not a readable file` message.
+
+**Rationale.** This is the difference between "the tool is broken" and "type the file
+name".  The guess is always announced and ambiguity is refused, so convenience never
+turns into a silent wrong-file repair.  The resolved absolute path is computed once and
+used by everything downstream, so the compiler, `CodeMap` and the patch tools cannot
+disagree about which file is open.
+
+**Consequence.** Verified: `newtest.cpp`, `Downloads\newtest.cpp`, `~/Downloads/newtest.cpp`
+and even the wrong-folder `C:\Users\Downloads\newtest.cpp` all repair
+`C:\Users\garyw\Downloads\newtest.cpp` (exit `0`), each printing the resolution except
+the exact path; a name present in two folders lists both and exits `2`.
+
+---
+
+## ADR-034 — The scratch copy has a ladder of writable homes
+
+**Context.** On a machine with Windows' Controlled Folder Access (or an antivirus)
+active, `--no-write` failed twice in a row: the copy under `%TEMP%` was not usable, and
+the fallback into the source folder (`%USERPROFILE%\Downloads`) was refused with
+`Permission denied`.  FixIt reported both attempts and exited `2` — honest, but still no
+repair.
+
+**Decision.** The copy is attempted, in order, in: the system temp directory;
+`%LOCALAPPDATA%\fixit` (or `$XDG_CACHE_HOME`/`~/.cache/fixit`); the directory of the
+running executable; the source file's directory; the current directory.  Every attempt is
+unique per run, verified to be a regular file, and removed afterwards; a failure lists
+every path it tried with the OS reason.
+
+**Rationale.** The program's own directory is writable *by definition* (the tool was built
+there), which makes it the reliable last resort on a locked-down machine — and it is
+placed before the source folder on purpose, because the user's Downloads folder is exactly
+what Controlled Folder Access protects.  The success path stays byte-identical (demo
+transcript and `expected_artifacts`).
+
+**Consequence.** Verified: with `TEMP` pointing at an unmounted drive the run completes
+through the program's directory and leaves no scratch folder behind.  The error now names
+every path attempted, which turns "permission denied" into "allow this program in Windows
+Security".
+
+---
+
+## ADR-035 — `fixit` is installed as a command, not by copying files
+
+**Context.** Users want to `cd` into a project and type `fixit.cmd main.cpp`.  The launcher
+lives in the checkout, so that only works if the checkout is on `PATH`; the docs previously
+made people type the full launcher path or edit `PATH` by hand.
+
+**Decision.** `tools\windows\install-command.ps1` adds a **user** `PATH` entry pointing at
+the checkout — no files are copied, so `git pull` keeps the command current.  When the
+registry cannot be written (locked-down or sandboxed session) it falls back to a small
+`fixit.cmd` shim in `%LOCALAPPDATA%\Microsoft\WindowsApps`, a folder Windows already has
+on `PATH`.  `-Remove` undoes either form.
+
+**Rationale.** A copied launcher would go stale; a `PATH` entry cannot.  The shim is the
+fallback rather than the default because a file buried in `WindowsApps` is harder to find
+and remove than a `PATH` entry, while still keeping the feature usable where the registry
+is restricted.  Nothing is installed system-wide and no project folder is touched.
+
+**Consequence.** Verified in a sandbox where both the registry and `WindowsApps` are
+read-only: the script degrades to the manual instruction instead of failing halfway.  With
+the checkout on `PATH`, `cd %USERPROFILE%\Downloads; fixit.cmd newtest.cpp ...` repairs the
+file (exit `0`) from a folder that contains neither the launcher nor the repository — the
+case that was asked for.
+
+---
+
+## ADR-036 — One command after clone: `setup.cmd`
+
+**Context.** A person on another machine has to (1) have a C++ compiler, (2) build with a
+script whose flags they must know, and (3) edit `PATH` before `fixit` works in any folder
+— three chances to give up.  The requirement was explicit: whoever clones this repository
+on any computer should be able to use fixit from most folders.
+
+**Decision.** A root `setup.cmd` (double-clickable, wrapping `setup.ps1` with
+`-ExecutionPolicy Bypass`) performs the whole per-machine setup and is idempotent: locate
+a compiler (via `fixit-env.ps1`'s ladder), optionally download the portable one
+(`-FetchToolchain`), reuse an up-to-date build or build, register the command through
+`install-command.ps1`, then verify that `fixit.cmd` resolves and print the next command.
+Source timestamps decide whether a rebuild is needed, so re-running costs seconds.
+
+**Rationale.** Everything the checkout cannot do for itself is *machine* state — a
+compiler, a build, a `PATH` entry — so it belongs in one visible step instead of being
+scattered through documentation.  It installs nothing system-wide, copies nothing into a
+project, and is reversible (`install-command.ps1 -Remove`).  When a step is blocked (for
+example a sandboxed session where the registry is read-only) it degrades to the exact
+manual instruction instead of failing halfway.
+
+**Consequence.** Verified: `setup.cmd -SkipInstall` reports `build is up to date` and exits
+`0`; the full run builds or keeps the build, attempts registration, and in a read-only
+sandbox prints the folder to add to `PATH` and still exits `0`.  On a normal user account
+the registration lands, and `fixit.cmd <file>` works from any folder (verified separately
+with the checkout on `PATH`: run from `Downloads` → exit `0`).
+
+
+
+
+
+

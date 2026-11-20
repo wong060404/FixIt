@@ -99,6 +99,12 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 > `tools\windows\probe-endpoint.py` 則在執行前檢查端點、金鑰與模型。
 > 執行。
 
+Windows 上還有一條更短的路，既不需要 CMake，也不必先設定環境：
+`.\fixit.ps1 <檔案> [選項]`（在 `cmd.exe` 中則是 `fixit.cmd`）會在第一次使用時
+自動建置、自己找到已安裝的編譯器，並把每個參數原樣轉交，因此單純 clone 下來就能
+直接執行。詳見
+[`WINDOWS-SETUP.zh-TW.md`](WINDOWS-SETUP.zh-TW.md#快速路徑會自己建置的-clone)。
+
 接著執行第 0 節的驗收指令：
 
 ```bash
@@ -564,9 +570,12 @@ roadmap 中。
 
 ```
 fixit/
+├── fixit.ps1, fixit.cmd                # Windows 啟動器：第一次使用時自動建置，零設定
 ├── include/fixit/{compiler,codemap,patch,agent,types}.h
 ├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm}.cpp
 ├── tools/fixit-cli/main.cpp
+├── tools/windows/{build_fixit.ps1,fixit-env.ps1,fetch_mingw.py,llm-relay.py,
+│                probe-endpoint.py,run-real-loop.ps1}
 ├── tools/matrix.cpp                     # the sweep behind §8a
 ├── tools/{gen_golden_cases.py,render_heatmap.py,gcc_sim.py,summarise_trace.py}
 ├── tools/{record_demo.sh,gen_expected.sh,record_compiler_fixtures.sh}

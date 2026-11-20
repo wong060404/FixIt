@@ -101,6 +101,12 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 > build, and `tools\windows\probe-endpoint.py` checks an endpoint, key and model before a
 > run.
 
+On Windows there is a shorter path that needs neither CMake nor a prepared
+environment: `.\fixit.ps1 <file> [options]` (or `fixit.cmd` from `cmd.exe`) builds
+the tool on first use, finds an installed compiler by itself, and forwards every
+argument unchanged, so a plain clone is runnable immediately. See
+[`WINDOWS-SETUP.md`](WINDOWS-SETUP.md#fast-path--a-clone-that-builds-itself).
+
 Then run the section-0 acceptance command:
 
 ```bash
@@ -573,9 +579,12 @@ nearest candidate, which the sweep counts as a miss. See
 
 ```
 fixit/
+├── fixit.ps1, fixit.cmd                # Windows launcher: builds on first use, no setup
 ├── include/fixit/{compiler,codemap,patch,agent,types}.h
 ├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm}.cpp
 ├── tools/fixit-cli/main.cpp
+├── tools/windows/{build_fixit.ps1,fixit-env.ps1,fetch_mingw.py,llm-relay.py,
+│                probe-endpoint.py,run-real-loop.ps1}
 ├── tools/matrix.cpp                     # the sweep behind §8a
 ├── tools/{gen_golden_cases.py,render_heatmap.py,gcc_sim.py,summarise_trace.py}
 ├── tools/{record_demo.sh,gen_expected.sh,record_compiler_fixtures.sh}

@@ -46,6 +46,44 @@ C:\FixIt\                          ← 工作資料夾（純英文路徑，重�
 
 ---
 
+## 快速路徑：會自己建置的 clone
+
+如果機器上已經有 C++ 編譯器（MSYS2，或任何讓 `g++` 出現在 `PATH` 上的安裝），
+**第一部分可以整段跳過**。專案附了一支啟動器，第一次使用時自動建置、自己找到
+編譯器，然後執行它：
+
+```powershell
+git clone https://github.com/wong060404/FixIt.git
+Set-Location FixIt
+.\setup.cmd        # 每台機器一次；可重複執行
+
+fixit.cmd examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write
+```
+
+`setup.cmd` 會找到（或詢問是否下載）編譯器、建置到 `build-win\`（第一次約一分鐘），
+並把 `fixit.cmd` 註冊成任何資料夾都能用的指令。重複執行沒有副作用：已是最新的建置
+會直接沿用。若不想註冊任何東西，也可以直接在 checkout 內執行 `fixit.cmd`；其餘什麼
+都不必設定 —— 不必手動改 `PATH`、不必設環境變數、不必 `chcp`、也不必 CMake，而且
+checkout 可以放在任何磁碟的任何資料夾。
+
+啟動器另外做了三件工具自己做不到的事：執行期間把主控台切到 UTF-8（結束後還原
+原本的內碼頁）、只為 fixit 把找到的編譯器加進 `PATH`，以及在參數含非 ASCII 字元時
+直接拒絕，並印出真正可行的兩行指令。
+
+| 啟動器專用旗標 | 作用 |
+|---|---|
+| `--fixit-rebuild` | 即使 `build-win` 已是最新也重建 |
+| `--fixit-fetch-toolchain` | 先下載可攜式 MinGW GCC（步驟 3），再建置 |
+
+在 `cmd.exe` 中用 `fixit.cmd`，參數完全相同。要修復的檔案可以放在任何其他專案
+資料夾、任何資料夾名稱之下，包含名稱裡有空白的情況。
+
+> **非 ASCII 路徑。** 請傳 ASCII 路徑。檔案參數若含中文，這個組建收不到（C++
+> 執行期拿到的是主控台內碼頁，不是 UTF-8）。先 `cd` 到該檔案所在資料夾、再用
+> 相對檔名執行則可以正常運作；啟動器拒絕參數時印出的正是這個做法。
+
+---
+
 ## 第一部分：安裝（做一次就好）
 
 ### 步驟 1：確認 Git 與 Python
@@ -205,6 +243,11 @@ $ g++ -fsyntax-only e1_missing_include.cpp
 
 ## 第二部分：日常使用
 
+檔案參數不必是完整路徑：`fixit.cmd lab3.cpp` 會到你的使用者資料夾（下載、桌面、文件）
+裡找，`Downloads\lab3.cpp` 視為相對於家目錄，`~/Downloads/lab3.cpp` 也可以。當 fixit
+必須猜測時，它會先印出選中的檔案（`fixit: using '…'`）；若一個檔名同時符合多個檔案，
+它會拒絕並列出來，不會亂修其中一個。
+
 每個新開的 PowerShell 視窗，先打這三行（或見附錄 B 設成永久）：
 
 ```powershell
@@ -218,6 +261,11 @@ $env:NO_COLOR = "1"
 | `chcp 65001` | 把主控台切成 UTF-8，否則 FixIt 的框線字元會顯示成 `鈺愨晲` 這種亂碼（只是顯示問題，不影響功能） |
 | 設 `PATH` | 讓 fixit 找到 `g++`。不設也可以，但要每次加 `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` |
 | `NO_COLOR` | 關掉顏色，輸出比較好複製 |
+
+> **從其他資料夾執行。** 先安裝一次指令：
+> `powershell -ExecutionPolicy Bypass -File tools\windows\install-command.ps1`；之後任何
+> 新視窗都能 `cd` 到專案資料夾、直接打 `fixit.cmd main.cpp`，即使 checkout 在別的地方。
+> 加 `-Remove` 可移除。
 
 ### 用法 A：只想找出錯在哪（最快，不用模型）
 
@@ -375,7 +423,9 @@ powershell -ExecutionPolicy Bypass `
 | `fetch_mingw.py` 說 destination contains non-ASCII | 工作路徑含中文 | 改用 `C:\FixIt`，重新 clone |
 | 編譯時一堆 `No such file or directory`、`cannot find -lstdc++` | 編譯器被放在中文路徑下 | 把整個 `C:\FixIt` 換成純英文路徑 |
 | `compiler not found. Looked in: ...` | 還沒下載編譯器 | 先做步驟 3 |
-| `the compiler could not be executed (exit code 127)` | `g++` 不在 PATH，也沒用 `--compiler` 指定 | 跑第二部分開頭那三行 |
+| `the compiler could not be executed (exit code 127)` | `g++` 不在 PATH | 跑第二部分開頭那三行，或改用 `.\fixit.cmd`（它會自動把編譯器加進 PATH） |
+| `the compiler exited 1 without reporting a diagnostic for this file` | 編譯器啟動了，卻找不到它自己的工具（`as.exe`）；MSYS2 的 gcc 是透過 PATH 尋找，所以只給 `--compiler` 絕對路徑並不足夠 | 把編譯器的 `bin` 資料夾加進 PATH，或改用 `.\fixit.cmd` |
+| `fixit: cannot create the --no-write scratch copy ... Permission denied` | 所有可寫位置都失敗（`TEMP`、`%LOCALAPPDATA%\fixit`、程式自己所在資料夾、原始檔資料夾、目前資料夾）——通常是 Windows 的「受控資料夾存取」或防毒軟體擋下這個未簽章程式 | 現在會自動改用第一個可寫的位置；若全部被擋，就拿掉 `--no-write`，或在「Windows 安全性 → 病毒與威脅防護 → 勒索軟體防護 → 受控資料夾存取」允許 `fixit.exe` |
 | `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` 直接指到 `https://` | 用 C-2 的轉發器，或改用 C-1 的本機模型 |
 | `RELAY_TARGET is not set.` | 沒告訴轉發器要連哪裡 | 先 `$env:RELAY_TARGET = "https://你的端點/v1"` |
 | `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | 已經有一個轉發器在跑 | 直接用那個，或先關掉舊的，或 `-Port 8792` 換一個埠 |
