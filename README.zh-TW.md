@@ -89,8 +89,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 
 > **Windows：** 不需要在全系統安裝任何東西。可攜式的 MinGW-w64 GCC 會由
 > `python tools\windows\fetch_mingw.py` 取得，而
-> `tools\windows\build_fixit.ps1` 不用 CMake 也能建出同樣的兩個執行檔（此處無法
-> 使用 CMake 產生器 —— 原因見該腳本的檔頭說明）。請照著
+> `tools\windows\build_fixit.ps1` 不用 CMake 也能建出同樣的兩個執行檔；那個工具鏈
+> 另外附了 cmake、ninja、gdb，所以 `cmake -B build-cmake -G Ninja` 同樣可行（CI 在
+> Windows 上走的就是這條路，`ctest` 也會跑）。請照著
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md)（或
 > [`WINDOWS-SETUP.zh-TW.md`](WINDOWS-SETUP.zh-TW.md) 中文版）的逐步指南操作，
 > 它從一台乾淨的 Windows 機器開始，最後得到一個已修好的檔案，你可以使用本機

@@ -215,7 +215,7 @@ $env:NO_COLOR = "1"
 
 | 那三行在幹嘛 | 說明 |
 |---|---|
-| `chcp 65001` | 把主控台切成 UTF-8，否則 FixIt 的框線字元會顯示成 `鈺愨晲` 這種亂碼（只是顯示問題，不影響功能） |
+| `chcp 65001` | **已經不需要了**：fixit 會自己把主控台設成 UTF-8，並在結束時還原原本的代碼頁。只有同時要跑舊版執行檔時才需要保留，舊版的框線字元會顯示成 `鈺愨晲` 這類亂碼，但從來不影響結果 |
 | 設 `PATH` | 讓 fixit 找到 `g++`。不設也可以，但要每次加 `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` |
 | `NO_COLOR` | 關掉顏色，輸出比較好複製 |
 
@@ -382,7 +382,7 @@ powershell -ExecutionPolicy Bypass `
 | `LLM request returned HTTP 401` / `404` | 金鑰錯 / 端點或模型名稱錯 | 用 `probe-endpoint.py` 先確認 |
 | 轉發器顯示 `key loaded : no` | 金鑰檔不在 `C:\FixIt\FixIt\.secrets\fixit_key` | 見 C-2 |
 | `tool_calls` 一直是空的、模型只回文字 | 該模型不支援工具呼叫 | 換一個支援 function calling 的模型 |
-| 輸出變成 `鈺愨晲`、`鉁?` 這類亂碼 | 主控台不是 UTF-8 | 執行 `chcp 65001` |
+| 輸出變成亂碼 | 主控台不是 UTF-8 | 目前版本會自行設定並還原；舊版執行檔請執行 `chcp 65001` |
 | 執行 `.ps1` 說「因為這個系統上已停用指令碼執行」 | PowerShell 預設禁止 | 如步驟 4 加上 `-ExecutionPolicy Bypass` |
 | 關掉視窗後 PATH 又失效 | 環境變數只在該視窗有效 | 見附錄 B |
 
@@ -400,12 +400,16 @@ gcc 會把自己安裝目錄下的函式庫路徑交給連結器 `ld`。路徑�
 代碼頁（例如 936/GBK）重新解讀，於是 `crt2.o`、`-lstdc++` 全部找不到，
 錯誤訊息還完全指不到真正的原因。放在 `C:\FixIt\toolchain` 就完全避開。
 
-**為什麼 Windows 上的建置腳本不用專案的 `cmake`？**
-在這個環境試過，有兩個獨立問題：`ninja` 會永久卡住（它會讀子行程的輸出管道直到 EOF，
-而某些環境下那個管道不會關閉）；`mingw32-make` 會把 CMake 產生的 UTF-8 Makefile 當成
-本地編碼讀，遇到中文路徑就變成亂碼而找不到檔案。`build_fixit.ps1` 做的是完全相同的事
-（C 用 gcc、C++ 用 g++、專案程式碼開 `-Wall -Wextra -Werror`），只是不經過 CMake。
-Linux / macOS 使用者照專案 README 的 `cmake` 流程即可。
+**Windows 上的建置要不要用專案的 `cmake`？**
+可以，CI 就是這樣跑的。`fetch_mingw.py` 下載的工具鏈本身也帶了 `cmake`、`ninja` 與
+`gdb`，把它的 `bin` 目錄加進 `PATH` 之後，`cmake -B build-cmake -G Ninja` 在 Windows
+上就能設定、建置並執行 `ctest`。`build_fixit.ps1` 則保留為「只需要編譯器」的備援路徑。
+
+有兩個歷史陷阱值得知道，因為它們都被誤認為 CMake 的錯。`mingw32-make` 會把 CMake
+產生的 UTF-8 Makefile 當成本地編碼讀，中文路徑會變亂碼——請用 Ninja。而 Ninja 是透過
+`%COMSPEC%` 啟動 shell 的，`COMSPEC` 一旦被弄壞（有台機器上它被設成一整串 `PATH`），
+每個連結步驟都會以 `CreateProcess failed` 失敗；先 `echo $env:COMSPEC` 確認，再怪
+產生器。
 
 **為什麼要一個本機轉發器？**
 專案刻意不依賴 OpenSSL（決策 ADR-004），所以預設建置沒有 TLS 能力。
