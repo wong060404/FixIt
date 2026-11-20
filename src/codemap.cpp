@@ -1,4 +1,5 @@
 #include "fixit/codemap.h"
+#include "fixit/platform.h"
 
 #include <optional>
 #include <vector>
@@ -101,7 +102,7 @@ struct CodeMap::Impl {
 CodeMap::CodeMap(const std::string& file_path) : impl_(std::make_unique<Impl>()), path_(file_path) {
   impl_->lines.push_back(std::string());  // 1-based indexing convenience
 
-  std::ifstream in(file_path, std::ios::binary);
+  std::ifstream in(to_path(file_path), std::ios::binary);
   if (!in) return;
   std::ostringstream buffer;
   buffer << in.rdbuf();

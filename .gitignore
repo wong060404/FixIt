@@ -1,5 +1,6 @@
 build/
 build-*/
+toolchain/
 .cache/
 compile_commands.json
 *.o
@@ -7,3 +8,7 @@ compile_commands.json
 
 # Never commit API keys
 .secrets/
+
+# Python byproducts
+__pycache__/
+*.pyc
