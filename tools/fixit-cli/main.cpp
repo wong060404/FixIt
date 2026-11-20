@@ -4,11 +4,13 @@
 
 #include <cstddef>
 #include <chrono>
+#include <codecvt>
 #include <cstdio>
 #include <filesystem>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -19,6 +21,10 @@
 // underscore-prefixed equivalents are the same functions.
 #include <io.h>
 #include <process.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #define fixit_getpid ::_getpid
 #define fixit_isatty ::_isatty
 #define fixit_fileno ::_fileno
@@ -37,6 +43,42 @@
 namespace {
 
 constexpr const char* kVersion = "0.1.0";
+
+#ifdef _WIN32
+/// Windows hands `main(int, char**)` its arguments in the ANSI code page, while
+/// every path inside FixIt is UTF-8.  Convert once, at startup, so a source file
+/// under a non-ASCII directory works instead of throwing inside std::filesystem.
+std::string acp_to_utf8(const std::string& text) {
+  if (text.empty()) return {};
+  const int wide_len = ::MultiByteToWideChar(CP_ACP, 0, text.data(),
+                                             static_cast<int>(text.size()), nullptr, 0);
+  if (wide_len <= 0) return text;
+  std::wstring wide(static_cast<std::size_t>(wide_len), L'\0');
+  ::MultiByteToWideChar(CP_ACP, 0, text.data(), static_cast<int>(text.size()), wide.data(),
+                        wide_len);
+  const int utf8_len =
+      ::WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_len, nullptr, 0, nullptr, nullptr);
+  if (utf8_len <= 0) return text;
+  std::string utf8(static_cast<std::size_t>(utf8_len), '\0');
+  ::WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_len, utf8.data(), utf8_len, nullptr,
+                        nullptr);
+  return utf8;
+}
+
+/// MinGW ships no non-"C" locale, and std::filesystem converts a narrow path to
+/// the native wide form through the global locale's codecvt facet.  Installing a
+/// UTF-8 facet is what makes the UTF-8 paths above usable.
+void enable_utf8_filesystem() {
+  try {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    std::locale::global(std::locale(std::locale("C"), new std::codecvt_utf8<wchar_t>));
+#pragma GCC diagnostic pop
+  } catch (...) {
+    // Leave the C locale in place: ASCII paths still work.
+  }
+}
+#endif  // _WIN32
 
 // ---------------------------------------------------------------------------
 // ANSI helpers.  Colour is disabled when stdout is not a TTY or NO_COLOR is
@@ -311,6 +353,19 @@ int main(int argc, char** argv) {
   // by the user's own file.  Report it as the documented code.
   try {
 
+#ifdef _WIN32
+    // Convert the ANSI command line to UTF-8 and make std::filesystem use it,
+    // so a file under a non-ASCII directory is usable.
+    enable_utf8_filesystem();
+    std::vector<std::string> utf8_args;
+    utf8_args.reserve(static_cast<std::size_t>(argc));
+    for (int i = 0; i < argc; ++i) utf8_args.push_back(acp_to_utf8(argv[i]));
+    std::vector<char*> utf8_argv;
+    utf8_argv.reserve(utf8_args.size());
+    for (std::string& arg : utf8_args) utf8_argv.push_back(arg.data());
+    argv = utf8_argv.data();
+#endif
+
     if (const char* no_colour = std::getenv("NO_COLOR"); no_colour != nullptr && *no_colour != '\0') {
       g_colour = false;
     } else if (fixit_isatty(fixit_fileno(stdout)) == 0) {
@@ -336,7 +391,7 @@ int main(int argc, char** argv) {
         std::cerr << "fixit: '" << options.file << "' is not a readable file\n";
         return 2;
       }
-      std::ifstream probe(options.file, std::ios::binary);
+      std::ifstream probe(std::filesystem::path(options.file), std::ios::binary);
       if (!probe) {
         std::cerr << "fixit: cannot open '" << options.file << "'\n";
         return 2;

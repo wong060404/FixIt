@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -101,7 +102,9 @@ struct CodeMap::Impl {
 CodeMap::CodeMap(const std::string& file_path) : impl_(std::make_unique<Impl>()), path_(file_path) {
   impl_->lines.push_back(std::string());  // 1-based indexing convenience
 
-  std::ifstream in(file_path, std::ios::binary);
+  // std::filesystem::path opens through the native wide API on Windows, so a
+  // UTF-8 path under a non-ASCII directory works.
+  std::ifstream in(std::filesystem::path(file_path), std::ios::binary);
   if (!in) return;
   std::ostringstream buffer;
   buffer << in.rdbuf();

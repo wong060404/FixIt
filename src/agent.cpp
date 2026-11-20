@@ -55,7 +55,9 @@ bool resolve_in_workdir(const std::string& workdir, const std::string& path, std
 }
 
 std::string slurp(const std::string& path, bool& ok) {
-  std::ifstream in(path, std::ios::binary);
+  // filesystem::path opens through the native wide API on Windows, so a UTF-8
+  // path under a non-ASCII directory works.
+  std::ifstream in(std::filesystem::path(path), std::ios::binary);
   if (!in) {
     ok = false;
     return {};

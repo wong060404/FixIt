@@ -412,7 +412,7 @@ cmake --build build-tls -j
 * 系統的 OpenSSL **不會**讀取鑰匙圈，因此即使是有效的 Let's Encrypt
   憑證，`https://` 仍會失敗並出現
   `SSL server verification failed`。所以 `OpenAiLlm` 會明確地為 OpenSSL 指定
-  一個 bundle：若設定了 `$FIXIT_CA_BUNDLE` 就用它，否則在 macOS 上用
+  一個 bundle：若設定了 `` 就用它，否則在 macOS 上用
   `/etc/ssl/cert.pem`（macOS 為自家 curl 隨附的 bundle），再否則使用一般常見的
   Linux 路徑。驗證絕不會被停用。
 
@@ -427,7 +427,7 @@ export FIXIT_API_KEY=sk-...          # or: --api-key
 ```
 
 `tools/fixit_with_my_key.sh` 為專案本地的設定封裝了這一切：它從
-`$FIXIT_API_KEY` 或被 git 忽略的 `.secrets/fixit_key` 讀取金鑰，讓金鑰不進入
+`` 或被 git 忽略的 `.secrets/fixit_key` 讀取金鑰，讓金鑰不進入
 `argv`（因此不會出現在 `ps` 輸出或日誌中），並在子行程執行前取消匯出，
 這樣就沒有任何 trace 或 metrics 檔案能含有它。
 
