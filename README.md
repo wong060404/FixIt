@@ -91,8 +91,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 
 > **Windows:** nothing has to be installed system-wide. A portable MinGW-w64 GCC is
 > fetched by `python tools\windows\fetch_mingw.py`, and
-> `tools\windows\build_fixit.ps1` builds the same two binaries without CMake (the CMake
-> generators cannot be used here — see the script header for why). Follow
+> `tools\windows\build_fixit.ps1` builds the same two binaries without CMake, and
+> `cmake -B build-cmake -G Ninja` works as well — that toolchain also ships cmake, ninja,
+> gdb, and it is the path CI takes on Windows, `ctest` included. Follow
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) (or
 > [`WINDOWS-SETUP.zh-TW.md`](WINDOWS-SETUP.zh-TW.md) 中文版) for a step-by-step guide
 > that starts from a bare Windows machine and ends with a repaired file, using either a
@@ -398,13 +399,22 @@ compile from, with the same `-I` flags you already use, or let
 
 ### 6.6 Using a real model over https
 
-The default build has no TLS, because OpenSSL is not one of the four permitted
-dependencies.  `https://` endpoints therefore need a TLS-enabled build:
+TLS is optional, because OpenSSL is not one of the four permitted dependencies.
+`FIXIT_TLS` decides what happens at configure time:
+
+| `-DFIXIT_TLS=` | Behaviour |
+|---|---|
+| `auto` *(default)* | enables TLS when a system OpenSSL is found, otherwise builds without it and says so at configure time |
+| `openssl` | requires one: `apt install libssl-dev`, `brew install openssl`, `vcpkg install openssl`, or the msys2 `mingw-w64-ucrt-x86_64-openssl` package |
+| `off` | never looks for OpenSSL |
 
 ```bash
-cmake -B build-tls -DCMAKE_BUILD_TYPE=Release -DFIXIT_ENABLE_OPENSSL=ON
+cmake -B build-tls -DCMAKE_BUILD_TYPE=Release -DFIXIT_TLS=openssl
 cmake --build build-tls -j
 ```
+
+Endpoints over plain `http://` -- Ollama, llama.cpp, `tools/windows/llm-relay.py`
+-- work in every build, on every platform, with or without TLS.
 
 `find_package(OpenSSL)` locates a system OpenSSL.  Two macOS specifics are worth
 knowing, both learned the hard way on this project:
@@ -418,6 +428,10 @@ knowing, both learned the hard way on this project:
   `$FIXIT_CA_BUNDLE` if set, otherwise `/etc/ssl/cert.pem` on macOS (the bundle
   macOS ships for its own curl), otherwise the usual Linux paths.  Verification
   is never disabled.
+* On Windows, cpp-httplib verifies the chain against the **Windows certificate
+  store** through WinCrypt, so a TLS-enabled build links `crypt32` (the CMake rules
+  do) and needs no CA bundle: the store already holds every root the machine trusts.
+  `FIXIT_CA_BUNDLE` is an override, not a requirement.
 
 Then run against any OpenAI-compatible endpoint:
 
