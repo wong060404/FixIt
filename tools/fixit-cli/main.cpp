@@ -357,6 +357,9 @@ int main(int argc, char** argv) {
     // Convert the ANSI command line to UTF-8 and make std::filesystem use it,
     // so a file under a non-ASCII directory is usable.
     enable_utf8_filesystem();
+    // Our output is UTF-8; tell the console so the box-drawing characters are
+    // rendered correctly instead of as the legacy code page.
+    ::SetConsoleOutputCP(CP_UTF8);
     std::vector<std::string> utf8_args;
     utf8_args.reserve(static_cast<std::size_t>(argc));
     for (int i = 0; i < argc; ++i) utf8_args.push_back(acp_to_utf8(argv[i]));
