@@ -3,10 +3,17 @@
 #   .\tools\windows\build_fixit.ps1
 #
 # The repository is found by walking up from this script, so it runs from
-# anywhere inside the checkout.  The toolchain is looked up in this order:
-#   1. $env:FIXIT_TOOLCHAIN
-#   2. <repository parent>\toolchain     (where fetch_mingw.py puts it)
-#   3. $env:TEMP\fixit-toolchain
+# anywhere inside the checkout, and every path below is repository-relative,
+# so the checkout itself can live anywhere (any drive, any user, any folder
+# name without whitespace issues).  The compiler is looked up in this order:
+#   1. -CompilerBin
+#   2. $env:FIXIT_TOOLCHAIN\mingw\mingw64\bin
+#   3. <repository parent>\toolchain\mingw\mingw64\bin  (fetch_mingw.py)
+#   4. $env:TEMP\fixit-toolchain\mingw\mingw64\bin
+#   5. the directory of a g++ already on PATH
+#   6. C:\msys64\{ucrt64,mingw64,mingw32}\bin
+# No environment variable has to be set for a normal run: an installed MSYS2
+# or a downloaded portable toolchain in any of those places is enough.
 #
 # Why not the documented `cmake -B build && cmake --build build` on Windows:
 #   * ninja blocks forever -- it reads each child's output pipe to EOF, and in
@@ -19,6 +26,10 @@
 # Every command below therefore uses relative paths with the repository as the
 # working directory.  C sources go through gcc (C11), C++ through g++ (C++20),
 # keeping the project's own -Wall -Wextra -Werror gate on its own code.
+
+param(
+  [string]$CompilerBin = ''
+)
 
 $ErrorActionPreference = 'Continue'
 
@@ -37,41 +48,37 @@ function Find-FixItRepo {
   throw "FixIt repository not found above $Start"
 }
 
-# winlibs changed its archive layout: older releases unpacked to
-#   <root>\mingw\mingw64\bin
-# and current ones (r3 and later) to
-#   <root>\mingw64\bin
-# Accept either, so a fresh download does not end in "compiler not found".
-function Find-MinWGBin {
-  param([string]$Root)
-  if (-not $Root) { return $null }
-  foreach ($relative in @('mingw64\bin', 'mingw\mingw64\bin')) {
-    $candidate = Join-Path $Root $relative
-    if (Test-Path (Join-Path $candidate 'g++.exe')) { return $candidate }
-  }
-  return $null
-}
 
 $repo = Find-FixItRepo $PSScriptRoot
-$tc = if ($env:FIXIT_TOOLCHAIN) { $env:FIXIT_TOOLCHAIN }
-      else { Join-Path (Split-Path -Parent $repo) 'toolchain' }
-$mingw = Find-MinWGBin $tc
-if ($null -eq $mingw) {
-  $fallback = Join-Path $env:TEMP 'fixit-toolchain'
-  $mingw = Find-MinWGBin $fallback
-  if ($null -ne $mingw) { $tc = $fallback }
-}
-if ($null -eq $mingw) {
-  Write-Host 'compiler not found. Looked in:'
-  Write-Host "  $tc"
-  Write-Host "  $(Join-Path $env:TEMP 'fixit-toolchain')"
-  Write-Host 'download it first with:'
+# Compiler discovery lives in tools/windows/fixit-env.ps1, so the launcher
+# (fixit.ps1) and this build script agree on which compiler to use without the
+# user setting FIXIT_TOOLCHAIN or prepending anything to PATH.  It accepts both
+# winlibs archive layouts (mingw64\bin and mingw\mingw64\bin) and an installed
+# MSYS2, so a fresh clone builds on more machines.
+. (Join-Path $PSScriptRoot 'fixit-env.ps1')
+
+$mingw = Find-FixitCompilerBin -Repo $repo -Preferred $CompilerBin
+if (-not $mingw) {
+  Write-Host 'compiler not found. Looked for gcc.exe, g++.exe and ar.exe in:'
+  if ($CompilerBin) { Write-Host "  $CompilerBin (-CompilerBin)" }
+  Write-Host '  $env:FIXIT_TOOLCHAIN\{mingw64\bin, mingw\mingw64\bin} (if set)'
+  Write-Host "  $(Join-Path (Split-Path -Parent $repo) 'toolchain')\..."
+  Write-Host "  $(Join-FixitPath $env:TEMP 'fixit-toolchain')\..."
+  Write-Host '  the directory of a g++ on PATH'
+  Write-Host "  $(Join-Path $env:SystemDrive 'msys64')\{ucrt64,mingw64,mingw32}\bin"
+  Write-Host 'download a portable one first with:'
   Write-Host "  python `"$(Join-Path $repo 'tools\windows\fetch_mingw.py')`""
   throw 'no toolchain'
 }
 $gcc = Join-Path $mingw 'gcc.exe'
 $gpp = Join-Path $mingw 'g++.exe'
 $ar = Join-Path $mingw 'ar.exe'
+
+# MSYS2's gcc looks up as.exe/ld.exe through PATH and exits 1 without any
+# message when its own bin directory is not there (verified: a bare absolute
+# path to gcc.exe compiles nothing).  Prepend it for this process only -- a
+# script cannot change the environment of the shell that called it.
+if ($env:PATH -notlike "*$mingw*") { $env:PATH = "$mingw;$env:PATH" }
 
 $build = Join-Path $repo 'build-win'
 New-Item -ItemType Directory -Force -Path (Join-Path $build 'obj'), (Join-Path $build 'bin') | Out-Null

@@ -14,6 +14,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #ifdef _WIN32
@@ -344,6 +345,203 @@ void print_errors(const fixit::CompileResult& result, const std::string& indent)
   print_error_list(result.diagnostics, indent);
 }
 
+/// A compile that failed without producing a single parsed diagnostic is the most
+/// confusing output this tool can print: "0 errors" next to "not fixed".  It means
+/// the compiler never got as far as analysing the file -- typically because it could
+/// not start its own sub-tools (as.exe, ld.exe), which on Windows happens when the
+/// compiler's bin directory is missing from PATH.  Say that, instead of "0 errors".
+/// Creates the private copy that --no-write repairs, and reports *why* it could not
+/// when it cannot.  This is the one step that can fail for reasons outside the
+/// tool's control (a full or read-only TEMP, an antivirus lock, a leftover
+/// directory that cannot be written into), and when it did fail silently the
+/// compiler reported "no such file", which read as a broken tool.  Try the system
+/// temp directory first, then the source file's own directory; a hidden copy there
+/// is removed again when the run ends.
+bool make_scratch_copy(const std::string& source,
+                       const std::string& executable,
+                       std::filesystem::path& scratch_dir,
+                       std::filesystem::path& copy_target,
+                       std::string& failure) {
+  // A ladder of writable homes, because any single one can be unusable: a full or
+  // read-only TEMP, Windows' Controlled Folder Access (or an antivirus) locking the
+  // user's own folders, or a source file that lives on a read-only share.  The
+  // program's own directory is a legitimate home: if the tool was built there, it is
+  // writable by definition.
+  std::vector<std::filesystem::path> roots;
+  std::error_code error;
+  const std::filesystem::path system_temp = std::filesystem::temp_directory_path(error);
+  if (!error && !system_temp.empty()) roots.push_back(system_temp);
+  if (const char* local = std::getenv("LOCALAPPDATA")) {
+    roots.push_back(std::filesystem::path(local) / "fixit");
+  }
+  if (const char* cache = std::getenv("XDG_CACHE_HOME")) {
+    roots.push_back(std::filesystem::path(cache) / "fixit");
+  } else if (const char* home = std::getenv("HOME")) {
+    roots.push_back(std::filesystem::path(home) / ".cache" / "fixit");
+  }
+  if (!executable.empty()) {
+    std::error_code local;
+    const std::filesystem::path exe = std::filesystem::absolute(executable, local);
+    if (!local && !exe.parent_path().empty()) roots.push_back(exe.parent_path());
+  }
+  const std::filesystem::path source_dir = std::filesystem::path(source).parent_path();
+  if (!source_dir.empty()) roots.push_back(source_dir);
+  std::error_code cwd_error;
+  const std::filesystem::path cwd = std::filesystem::current_path(cwd_error);
+  if (!cwd_error) roots.push_back(cwd);
+
+  const std::string unique =
+      std::to_string(fixit_getpid()) + "-" +
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  const std::string name = "fixit-no-write-" + unique;
+
+  std::ostringstream attempts;
+  for (const std::filesystem::path& root : roots) {
+    std::error_code local;
+    const std::filesystem::path dir = root / name;
+    std::filesystem::create_directories(dir, local);
+    if (!local) {
+      const std::filesystem::path target = dir / std::filesystem::path(source).filename();
+      std::filesystem::copy_file(source, target,
+                                 std::filesystem::copy_options::overwrite_existing, local);
+      if (!local && std::filesystem::is_regular_file(target, local)) {
+        scratch_dir = dir;
+        copy_target = target;
+        return true;
+      }
+      if (!local) local = std::make_error_code(std::errc::no_such_file_or_directory);
+      std::error_code ignored;
+      std::filesystem::remove_all(dir, ignored);
+    }
+    attempts << "  " << dir.string() << ": " << local.message() << "\n";
+  }
+  failure = attempts.str();
+  return false;
+}
+
+/// Expands `~`, `%VARS%` and a stray pair of surrounding quotes, so a path can be
+/// pasted from Explorer or written the way a person says it.
+std::string expand_user_path(const std::string& raw) {
+  std::string value = raw;
+  if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') ||
+                            (value.front() == '\'' && value.back() == '\''))) {
+    value = value.substr(1, value.size() - 2);
+  }
+  const auto home = []() -> std::string {
+    if (const char* profile = std::getenv("USERPROFILE")) return profile;
+    if (const char* h = std::getenv("HOME")) return h;
+    return {};
+  };
+  if (!value.empty() && value[0] == '~') {
+    const std::string base = home();
+    if (!base.empty()) value = base + value.substr(1);
+  }
+  std::string expanded;
+  for (std::size_t i = 0; i < value.size();) {
+    if (value[i] == '%') {
+      const std::size_t end = value.find('%', i + 1);
+      if (end != std::string::npos) {
+        const std::string name = value.substr(i + 1, end - i - 1);
+        if (const char* env = std::getenv(name.c_str())) {
+          expanded += env;
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+    expanded += value[i++];
+  }
+  return expanded;
+}
+
+/// Finds the file the user meant without making them build an absolute path by
+/// hand.  Tried in order: the literal path; the usual user folders joined with
+/// the given path (`Downloads\\f.cpp`, `~/Downloads/f.cpp`); and, for anything
+/// that does not exist yet, the same file *name* inside those folders.  When it
+/// has to guess it says which file it picked, and when a name matches more than
+/// one file it refuses instead of choosing, because repairing the wrong file
+/// silently would be worse than an error.
+std::string resolve_input_path(const std::string& raw) {
+  const std::filesystem::path literal = expand_user_path(raw);
+  std::error_code error;
+  if (std::filesystem::is_regular_file(literal, error)) return literal.string();
+
+  std::vector<std::filesystem::path> roots;
+  const auto add_root = [&roots](const std::string& base) {
+    if (base.empty()) return;
+    std::error_code local;
+    const std::filesystem::path root(base);
+    if (!std::filesystem::is_directory(root, local)) return;
+    for (const std::filesystem::path& candidate : roots) {
+      if (candidate == root) return;
+    }
+    roots.push_back(root);
+  };
+  for (const char* variable : {"USERPROFILE", "HOME"}) {
+    const char* base = std::getenv(variable);
+    if (!base) continue;
+    add_root(base);
+    for (const char* sub : {"Downloads", "Desktop", "Documents", "OneDrive\\Desktop",
+                            "OneDrive\\Documents"}) {
+      add_root((std::filesystem::path(base) / sub).string());
+    }
+  }
+
+  std::vector<std::filesystem::path> matches;
+  const auto consider = [&matches](const std::filesystem::path& candidate) {
+    std::error_code local;
+    if (!std::filesystem::is_regular_file(candidate, local)) return;
+    for (const std::filesystem::path& seen : matches) {
+      if (seen == candidate) return;
+    }
+    matches.push_back(candidate);
+  };
+  for (const std::filesystem::path& root : roots) {
+    consider(root / literal);
+    consider(root / literal.filename());
+  }
+
+  if (matches.size() == 1) {
+    // stdout on purpose: this is information, not an error, and PowerShell
+    // paints anything on stderr red.
+    std::cout << "fixit: using '" << matches.front().string() << "'"
+              << "  (resolved from '" << raw << "')\n";
+    return matches.front().string();
+  }
+  if (matches.size() > 1) {
+    std::cerr << "fixit: '" << raw << "' matches several files; pass the full path:\n";
+    for (const std::filesystem::path& match : matches) {
+      std::cerr << "  " << match.string() << "\n";
+    }
+  }
+  return literal.string();
+}
+
+void print_compile_failure(const fixit::CompileResult& result, const std::string& indent) {
+  if (result.timed_out) {
+    std::cout << "  " << red("✗ the compiler timed out") << "\n";
+  } else if (result.exit_code == 127 || result.exit_code == -1) {
+    std::cout << "  " << red("✗ the compiler could not be executed") << "\n";
+    std::cout << indent << "hint: put the compiler's bin folder on PATH -- on Windows,"
+              << " .\\fixit.cmd does that for you\n";
+  } else {
+    std::cout << "  " << red("✗ the compiler exited " + std::to_string(result.exit_code) +
+                             " without reporting a diagnostic for this file") << "\n";
+    std::cout << indent
+              << "hint: it probably could not start its own tools (as.exe/ld.exe).  Put its\n";
+    std::cout << indent
+              << "bin folder on PATH -- on Windows, .\\fixit.cmd does that for you.\n";
+  }
+  if (!result.raw_output.empty()) {
+    std::cout << indent << "compiler output:" << "\n";
+    std::istringstream lines(result.raw_output);
+    std::string line;
+    while (std::getline(lines, line)) {
+      std::cout << indent << "  " << line << "\n";
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -383,6 +581,9 @@ int main(int argc, char** argv) {
       return exit_code;
     }
     const Options options = *parsed;
+    // The argument is resolved once, here: everything downstream (the compiler,
+    // CodeMap, the patch tools) must see the same absolute path.
+    const std::string input_file = resolve_input_path(options.file);
 
     std::string original_content;
     {
@@ -390,13 +591,13 @@ int main(int argc, char** argv) {
       // reports nothing for it -- which used to read as "clean".  Require a
       // regular file so an obvious typo can never look like a passing build.
       std::error_code error;
-      if (!std::filesystem::is_regular_file(options.file, error)) {
-        std::cerr << "fixit: '" << options.file << "' is not a readable file\n";
+      if (!std::filesystem::is_regular_file(input_file, error)) {
+        std::cerr << "fixit: '" << input_file << "' is not a readable file\n";
         return 2;
       }
-      std::ifstream probe(std::filesystem::path(options.file), std::ios::binary);
+      std::ifstream probe(std::filesystem::path(input_file), std::ios::binary);
       if (!probe) {
-        std::cerr << "fixit: cannot open '" << options.file << "'\n";
+        std::cerr << "fixit: cannot open '" << input_file << "'\n";
         return 2;
       }
       std::ostringstream buffer;
@@ -421,7 +622,7 @@ int main(int argc, char** argv) {
       // The repair runs on a scratch copy in a temp directory, so a header that
       // sits next to the original source would no longer be found.  Keep the
       // original directory on the include path.
-      config.extra_flags.push_back("-I" + dirname_of(options.file));
+      config.extra_flags.push_back("-I" + dirname_of(input_file));
     }
     const fixit::Compiler compiler(config);
 
@@ -433,17 +634,21 @@ int main(int argc, char** argv) {
     // manual cleanup lambda was only called on two paths and therefore leaked
     // the scratch directory in --outline mode.
     std::string scratch_dir;
-    std::string target_file = options.file;
+    std::string target_file = input_file;
     if (options.no_write) {
-      std::error_code error;
-      const std::filesystem::path scratch =
-          std::filesystem::temp_directory_path(error) /
-          ("fixit-no-write-" + std::to_string(fixit_getpid()));
-      std::filesystem::create_directories(scratch, error);
-      std::filesystem::copy_file(options.file, scratch / basename_of(options.file),
-                                 std::filesystem::copy_options::overwrite_existing, error);
-      scratch_dir = scratch.string();
-      target_file = (scratch / basename_of(options.file)).string();
+      std::filesystem::path scratch_path;
+      std::filesystem::path copy_path;
+      std::string failure;
+      if (!make_scratch_copy(input_file, argv[0] != nullptr ? argv[0] : "", scratch_path,
+                             copy_path, failure)) {
+        std::cerr << "fixit: cannot create the --no-write scratch copy. Tried:\n" << failure;
+        std::cerr << "  hint: run without --no-write, or allow fixit.exe in Windows Security >\n"
+                     "        Virus & threat protection > Ransomware protection >\n"
+                     "        Controlled folder access.\n";
+        return 2;
+      }
+      scratch_dir = scratch_path.string();
+      target_file = copy_path.string();
     }
     struct ScratchGuard {
       std::filesystem::path path;
@@ -455,8 +660,8 @@ int main(int argc, char** argv) {
       }
     } scratch_guard{scratch_dir};
 
-    const std::string display_file = basename_of(options.file);
-    const std::string workdir = options.no_write ? scratch_dir : dirname_of(options.file);
+    const std::string display_file = basename_of(input_file);
+    const std::string workdir = options.no_write ? scratch_dir : dirname_of(input_file);
 
     const auto started = std::chrono::steady_clock::now();
     const auto elapsed = [&] {
@@ -465,7 +670,7 @@ int main(int argc, char** argv) {
 
     // ---- outline mode --------------------------------------------------------
     if (options.outline) {
-      const fixit::CodeMap map(options.file);
+      const fixit::CodeMap map(input_file);
       std::cout << "══ FixIt v" << kVersion << " · outline mode ══\n\n";
       std::cout << display_file << ": " << map.line_count() << " lines, "
                 << map.functions().size() << " functions\n";
@@ -505,10 +710,14 @@ int main(int argc, char** argv) {
         std::cout << "  " << green("✓ clean") << "\n";
         return 0;
       }
-      std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
-                               (result.error_count() == 1 ? " error" : " errors"))
-                << "\n";
-      print_errors(result, "    ");
+      if (result.error_count() == 0) {
+        print_compile_failure(result, "    ");
+      } else {
+        std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
+                                 (result.error_count() == 1 ? " error" : " errors"))
+                  << "\n";
+        print_errors(result, "    ");
+      }
       return 1;
     }
 
@@ -564,10 +773,14 @@ int main(int argc, char** argv) {
             std::cout << "  " << green("✓ clean") << "\n";
           } else {
             const std::size_t errors = event.compile.error_count();
-            std::cout << "  " << red("✗ " + std::to_string(errors) +
-                                     (errors == 1 ? " error" : " errors"))
-                      << "\n";
-            print_errors(event.compile, "    ");
+            if (errors == 0) {
+              print_compile_failure(event.compile, "    ");
+            } else {
+              std::cout << "  " << red("✗ " + std::to_string(errors) +
+                                       (errors == 1 ? " error" : " errors"))
+                        << "\n";
+              print_errors(event.compile, "    ");
+            }
           }
           return;
         }
@@ -587,9 +800,13 @@ int main(int argc, char** argv) {
           return;
         }
         const std::size_t errors = event.compile.error_count();
-        std::cout << "  " << red("✗ " + std::to_string(errors) + (errors == 1 ? " error" : " errors"))
-                  << "\n";
-        print_errors(event.compile, "    ");
+        if (errors == 0) {
+          print_compile_failure(event.compile, "    ");
+        } else {
+          std::cout << "  " << red("✗ " + std::to_string(errors) + (errors == 1 ? " error" : " errors"))
+                    << "\n";
+          print_errors(event.compile, "    ");
+        }
 
         if (!event.compile.diagnostics.empty()) {
           fixit::CodeMap map(target_file);
