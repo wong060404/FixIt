@@ -7,14 +7,15 @@
 # tree-sitter-cpp, cpp-httplib, nlohmann/json, Catch2) and nothing else may be
 # introduced.  ADR-006 in docs/decisions.md records why both mechanisms exist.
 #
-# Upstream revisions of the vendored snapshot:
+# Upstream revisions of the vendored snapshot.  These MUST match the pinned tags
+# in cmake/ThirdParty.cmake; update both together.
 #
 #   path                          repository                                    revision
-#   third_party/tree-sitter       https://github.com/tree-sitter/tree-sitter     v0.26.13 line (language ABI 15)
+#   third_party/tree-sitter       https://github.com/tree-sitter/tree-sitter     752c612a1359f00e4c113593837a0c1e880214e3 (0.28.0 line, ABI 15)
 #   third_party/tree-sitter-cpp   https://github.com/tree-sitter/tree-sitter-cpp v0.23.4
-#   third_party/cpp-httplib       https://github.com/yhirose/cpp-httplib         v0.28.0
+#   third_party/cpp-httplib       https://github.com/yhirose/cpp-httplib         v0.59.0
 #   third_party/json              https://github.com/nlohmann/json               v3.12.0
-#   third_party/Catch2            https://github.com/catchorg/Catch2             v3.8.1
+#   third_party/Catch2            https://github.com/catchorg/Catch2             v3.16.0
 #
 # To switch to real submodules instead, run (once per component):
 #   git submodule add <repository> <path>

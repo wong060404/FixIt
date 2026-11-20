@@ -1,15 +1,12 @@
 name: ci
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   build-and-test:
     name: ${{ matrix.name }}
@@ -29,38 +26,31 @@ jobs:
             os: macos-latest
             cxx: clang++
             cc: clang
-
     steps:
       - name: Check out (with submodules, if any)
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
       - name: Install gcc-12 (ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-12 g++-12
           g++-12 --version
-
       - name: Report compiler versions
         run: |
           ${{ matrix.cc }} --version
           cmake --version
-
       - name: Configure
         run: >
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=${{ matrix.cc }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
           -DFIXIT_TEST_COMPILER=${{ matrix.cxx }}
-
       - name: Build
         run: cmake --build build -j 4
-
       - name: Test
         run: ctest --test-dir build --output-on-failure
-
       # The demos are part of the acceptance criteria: e1 and e2 must be fixed
       # by the mock (exit 0) and e3 must be left alone (exit 1).  --no-write
       # repairs a scratch copy so the checkout stays clean.
@@ -78,3 +68,58 @@ jobs:
             echo "e3 must NOT be fixed by the mock rules"; exit 1
           fi
           git diff --exit-code   # the demos must not have touched the tree
+  # Windows is validated with the MSYS2 UCRT64 toolchain.  The project officially
+  # supports gcc/clang (not MSVC), and this is exactly the toolchain the Windows
+  # setup guide installs.  Ninja is the generator because mingw32-make misreads
+  # CMake's UTF-8 Makefiles under some locales.  -static makes the produced
+  # executables independent of the MinGW runtime DLLs, which matters for the
+  # ctest PATH handling.
+  windows:
+    name: windows-latest / msys2-ucrt64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Check out (with submodules, if any)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install the UCRT64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+      - name: Report compiler versions
+        run: |
+          gcc --version
+          cmake --version
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=gcc
+          -DCMAKE_CXX_COMPILER=g++
+          -DFIXIT_TEST_COMPILER=g++
+          -DCMAKE_EXE_LINKER_FLAGS=-static
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Demo smoke test
+        run: |
+          set -eux
+          BIN="build/bin/fixit.exe"
+          "$BIN" examples/buggy/e1_missing_include.cpp --agent --llm mock --verbose \
+            --compiler g++ --no-write
+          "$BIN" examples/buggy/e2_drift.cpp --agent --llm mock \
+            --compiler g++ --no-write
+          if "$BIN" examples/buggy/e3_type_error.cpp --agent --llm mock \
+               --compiler g++ --no-write; then
+            echo "e3 must NOT be fixed by the mock rules"; exit 1
+          fi
+          git diff --exit-code

@@ -7,10 +7,11 @@
 // window, applies the best one above a gate, and -- when nothing passes --
 // returns a structured, human/LLM readable explanation of *why*.
 //
-// Partial-apply policy: hunks that pass the gate are written, hunks that do not
-// keep their region untouched, and all_applied reports whether every hunk
-// landed.  The caller therefore always gets the best available file state plus
-// exact information about what is still missing.
+// Apply policy: a PatchResult is a *candidate*.  `new_content` is only safe to
+// write when `all_applied` is true (every hunk passed the gate).  If any hunk is
+// refused, the matched hunks are still reported for diagnosis, but the caller
+// must not commit the file -- the agent tool writes only on all_applied and
+// reports `"committed": false` otherwise.
 
 #include <cstddef>
 #include <string>
@@ -55,7 +56,7 @@ struct HunkReport {
 
 struct PatchResult {
   bool all_applied = false;
-  std::string new_content;  ///< applied hunks written, failed hunks untouched
+  std::string new_content;  ///< candidate content; only commit when all_applied
   std::vector<HunkReport> reports;
 
   /// Ready-to-feed-back text for the LLM.  See README for the exact shape.
@@ -66,14 +67,20 @@ struct PatchConfig {
   int max_drift = 200;                ///< cap for the global fallback window
   double fuzzy_line_threshold = 0.8;  ///< per-line Levenshtein ratio
   double gate = 0.8;                  ///< minimum hunk score to apply
+  /// When > 0, a hunk whose two best candidates are closer than this margin is
+  /// treated as an ambiguous location and refused instead of being placed at the
+  /// nearest guess.  0 disables the check (the historical behaviour).
+  double ambiguity_margin = 0.0;
 };
 
 class PatchEngine {
  public:
   explicit PatchEngine(PatchConfig cfg = {});
 
-  /// Applies `unified_diff` to `file_content`.  `target_file_hint` (when
-  /// non-empty) selects one file out of a multi-file diff by basename match.
+  /// Applies `unified_diff` to `file_content`.  `target_file_hint` selects one
+  /// file out of a multi-file diff: an exact relative-path match wins, and a
+  /// bare basename is used only when it identifies a single file.  An ambiguous
+  /// basename is refused rather than guessed.
   PatchResult apply(const std::string& file_content,
                     const std::string& unified_diff,
                     const std::string& target_file_hint = "") const;

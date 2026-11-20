@@ -1,5 +1,7 @@
 {
-  // 用 CMake 產生的編譯資料庫餵給 IntelliSense，這樣 catch2 / tree-sitter 的標頭都找得到
+  // 用 CMake 產生的編譯資料庫餵給 IntelliSense，這樣 catch2 / tree-sitter 的標頭都找得到。
+  // compilerPath 與 intelliSenseMode 交給 compile_commands.json / CMake 決定，
+  // 不再硬寫某台機器 / 某個作業系統的路徑。
   "configurations": [
     {
       "name": "fixit-cmake",
@@ -9,10 +11,9 @@
         "${workspaceFolder}/third_party/Catch2/src/catch2",
         "${workspaceFolder}/third_party/**"
       ],
-      "compilerPath": "/usr/bin/clang++",
       "cStandard": "c17",
       "cppStandard": "c++20",
-      "intelliSenseMode": "macos-clang-arm64"
+      "intelliSenseMode": "${default}"
     }
   ],
   "version": 4

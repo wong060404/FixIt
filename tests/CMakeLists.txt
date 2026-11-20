@@ -26,14 +26,19 @@ function(fixit_add_test name)
     target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
   endif()
   add_test(NAME ${name} COMMAND ${name})
-  set_tests_properties(${name} PROPERTIES
-    ENVIRONMENT "PATH=${CMAKE_BINARY_DIR}/bin:$ENV{PATH}")
+  # Deliberately no ENVIRONMENT override for PATH.  The tests address the CLI and
+  # the compiler by absolute path (FIXIT_CLI_PATH / FIXIT_TEST_COMPILER) and never
+  # need build/bin on PATH.  Setting PATH through the ENVIRONMENT property is a
+  # trap: that property is a semicolon-separated CMake list, so a Windows value
+  # such as `PATH=a;C:\b;C:\c` is split into the single entry `PATH=a` and every
+  # other directory -- including the compiler's runtime DLLs -- is dropped.  The
+  # build then works but every test that spawns the compiler dies with a missing
+  # DLL.  Inheriting the caller's environment is both simpler and correct.
 endfunction()
 
 fixit_add_test(patch_golden.test patch_golden.test.cpp)
 fixit_add_test(compiler.test compiler.test.cpp)
 fixit_add_test(codemap.test codemap.test.cpp)
 fixit_add_test(agent_mock.test agent_mock.test.cpp)
-
 fixit_add_test(expected_artifacts.test expected_artifacts.test.cpp)
 fixit_add_test(cli_contract.test cli_contract.test.cpp)

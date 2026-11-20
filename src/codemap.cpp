@@ -1,5 +1,4 @@
 #include "fixit/codemap.h"
-#include "fixit/platform.h"
 
 #include <optional>
 #include <vector>
@@ -102,7 +101,7 @@ struct CodeMap::Impl {
 CodeMap::CodeMap(const std::string& file_path) : impl_(std::make_unique<Impl>()), path_(file_path) {
   impl_->lines.push_back(std::string());  // 1-based indexing convenience
 
-  std::ifstream in(to_path(file_path), std::ios::binary);
+  std::ifstream in(file_path, std::ios::binary);
   if (!in) return;
   std::ostringstream buffer;
   buffer << in.rdbuf();
@@ -246,8 +245,10 @@ std::vector<int> CodeMap::syntax_error_lines() const {
 bool CodeMap::has_syntax_errors() const {
   if (!impl_) return true;
   if (path_.empty()) return true;
+  // A file that could not be read never set impl_->parsed, so this check already
+  // covers missing/unreadable files.  An empty file, however, is a perfectly
+  // valid C++ translation unit and must not be reported as broken.
   if (!impl_->parsed) return true;
-  if (source_.empty()) return true;  // a missing/unreadable file lands here
   return !syntax_error_lines().empty();
 }
 

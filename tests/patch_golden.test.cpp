@@ -195,7 +195,9 @@ TEST_CASE("partial application writes what it can", "[patch]") {
   REQUIRE(result.reports.size() == 2);
   CHECK(result.reports[0].status == fixit::HunkReport::Status::Applied);
   CHECK(result.reports[1].status == fixit::HunkReport::Status::Failed);
-  // The applied hunk is written, the failed one leaves its region untouched.
+  // The applied hunk is written into the *candidate* content, the failed one
+  // leaves its region untouched.  Committing it is the caller's decision and
+  // happens only when all_applied is true.
   CHECK(result.new_content == "ALPHA\nbeta\ngamma\n");
 }
 
@@ -369,4 +371,52 @@ TEST_CASE("an insertion hunk must not consume the following line",
   // The line after the insertion point must still be there.
   CHECK(result.new_content.find("L8\nL9\n") != std::string::npos);
   CHECK(result.new_content.find("INSERTED\n") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Regression: two files that merely share a basename must never collide.
+//
+// parse_diff stores the relative path (a/ and b/ stripped, directories kept),
+// and apply() refuses an ambiguous bare basename instead of patching both.
+// ---------------------------------------------------------------------------
+TEST_CASE("files with the same basename in different directories never collide",
+          "[patch][parse][negative]") {
+  const std::string diff =
+      "--- a/src/foo.cpp\n+++ b/src/foo.cpp\n@@ -1,1 +1,1 @@\n-int x = 1;\n+int x = 2;\n"
+      "--- a/tests/foo.cpp\n+++ b/tests/foo.cpp\n@@ -1,1 +1,1 @@\n-int y = 1;\n+int y = 2;\n";
+  const std::vector<fixit::DiffFile> files = fixit::PatchEngine::parse_diff(diff);
+  REQUIRE(files.size() == 2);
+  CHECK(files[0].path == "src/foo.cpp");
+  CHECK(files[1].path == "tests/foo.cpp");
+
+  const fixit::PatchEngine engine;
+  // The full relative path selects exactly one file.
+  const fixit::PatchResult src = engine.apply("int x = 1;\n", diff, "src/foo.cpp");
+  CHECK(src.all_applied);
+  CHECK(src.new_content == "int x = 2;\n");
+
+  // A bare basename matches both: refuse rather than guess.
+  const fixit::PatchResult ambiguous = engine.apply("int x = 1;\n", diff, "foo.cpp");
+  CHECK_FALSE(ambiguous.all_applied);
+  REQUIRE_FALSE(ambiguous.reports.empty());
+  CHECK(ambiguous.reports.front().failure_reason.find("ambiguous") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Regression: the failure summary must tell the model that matched hunks were
+// not committed.  The agent only writes the file when all_applied is true, so a
+// partial result is a diagnosis, not a change.
+// ---------------------------------------------------------------------------
+TEST_CASE("a refused patch says its matched hunks were not committed",
+          "[patch][atomic]") {
+  const std::string content = "alpha\nbeta\n";
+  const std::string diff =
+      "--- a/f.cpp\n+++ b/f.cpp\n"
+      "@@ -1,1 +1,1 @@\n-alpha\n+ALPHA\n"
+      "@@ -9,1 +9,1 @@\n-missing\n+nope\n";
+  const fixit::PatchEngine engine;
+  const fixit::PatchResult result = engine.apply(content, diff, "f.cpp");
+  CHECK_FALSE(result.all_applied);
+  const std::string summary = result.failure_summary("f.cpp");
+  CHECK(summary.find("MATCHED (not committed)") != std::string::npos);
 }

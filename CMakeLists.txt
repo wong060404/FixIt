@@ -5,6 +5,8 @@ project(fixit
         DESCRIPTION "Fuzzy-patch agentic C++ repair loop"
         LANGUAGES C CXX)
 
+include(GNUInstallDirs)
+
 # ---------------------------------------------------------------------------
 # Global build settings
 # ---------------------------------------------------------------------------
@@ -47,10 +49,11 @@ add_library(fixit
   src/patch.cpp
   src/agent.cpp
   src/openai_llm.cpp
-  src/mock_llm.cpp
-  src/platform.cpp)
+  src/mock_llm.cpp)
 
-target_include_directories(fixit PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(fixit PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(fixit PUBLIC fixit_third_party)
 
 # Hard quality gate for *our* code only (third-party headers are SYSTEM).
@@ -80,11 +83,6 @@ if(FIXIT_BUILD_CLI)
   add_executable(fixit-cli tools/fixit-cli/main.cpp)
   target_link_libraries(fixit-cli PRIVATE fixit)
   set_target_properties(fixit-cli PROPERTIES OUTPUT_NAME fixit)
-  if(WIN32)
-    # CommandLineToArgvW (the UTF-8 argv reconstruction) lives in shell32.  MinGW
-    # links it implicitly; MSVC does not.
-    target_link_libraries(fixit-cli PRIVATE shell32)
-  endif()
   if(NOT MSVC)
     target_compile_options(fixit-cli PRIVATE -Wall -Wextra -Werror)
   endif()
@@ -108,4 +106,53 @@ endif()
 if(FIXIT_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# Install / export
+#
+# Lets another CMake project consume the library:
+#
+#   find_package(FixIt CONFIG REQUIRED)
+#   target_link_libraries(myapp PRIVATE FixIt::fixit)
+#
+# Only the vendored snapshot is exportable: a FetchContent build links external
+# targets that have no install location, so the rules are skipped there.
+# ---------------------------------------------------------------------------
+if(NOT TARGET tree-sitter)
+  include(CMakePackageConfigHelpers)
+
+  install(TARGETS fixit fixit_third_party fixit_tree_sitter fixit_tree_sitter_cpp
+                  fixit_json fixit_httplib
+          EXPORT FixItTargets
+          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+          INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+  # The project's own public headers.
+  install(DIRECTORY include/fixit DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+  # Third-party headers the public API needs: agent.h exposes <nlohmann/json.hpp>.
+  install(DIRECTORY third_party/json/include/nlohmann
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fixit/third_party/json)
+  install(DIRECTORY third_party/tree-sitter/lib/include/tree_sitter
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fixit/third_party/tree-sitter)
+  install(FILES third_party/cpp-httplib/httplib.h
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fixit/third_party/cpp-httplib)
+
+  install(EXPORT FixItTargets
+          FILE FixItTargets.cmake
+          NAMESPACE FixIt::
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/FixIt)
+
+  configure_package_config_file(cmake/FixItConfig.cmake.in
+          ${CMAKE_CURRENT_BINARY_DIR}/FixItConfig.cmake
+          INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/FixIt)
+  write_basic_package_version_file(
+          ${CMAKE_CURRENT_BINARY_DIR}/FixItConfigVersion.cmake
+          VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/FixItConfig.cmake
+                ${CMAKE_CURRENT_BINARY_DIR}/FixItConfigVersion.cmake
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/FixIt)
 endif()

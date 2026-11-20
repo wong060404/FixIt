@@ -48,32 +48,6 @@ std::string join_lines(const std::vector<std::string>& lines) {
 
 bool ends_with_newline(const std::string& s) { return !s.empty() && s.back() == '\n'; }
 
-/// True when the file's line endings are mostly CRLF.
-bool crlf_dominant(const std::string& content) {
-  std::size_t crlf = 0;
-  std::size_t lf_only = 0;
-  for (std::size_t i = 0; i < content.size(); ++i) {
-    if (content[i] != '\n') continue;
-    if (i > 0 && content[i - 1] == '\r') {
-      ++crlf;
-    } else {
-      ++lf_only;
-    }
-  }
-  return crlf > lf_only;
-}
-
-/// Rewrites bare LF as CRLF, leaving existing CRLF pairs alone.
-std::string with_crlf_endings(const std::string& content) {
-  std::string out;
-  out.reserve(content.size() + content.size() / 16 + 1);
-  for (std::size_t i = 0; i < content.size(); ++i) {
-    if (content[i] == '\n' && (i == 0 || content[i - 1] != '\r')) out.push_back('\r');
-    out.push_back(content[i]);
-  }
-  return out;
-}
-
 std::string basename_of(const std::string& path) {
   std::string p = path;
   // strip a/ or b/ prefix used by git-style diffs
@@ -95,6 +69,15 @@ std::string trim(const std::string& s) {
   while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
   while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
   return s.substr(b, e - b);
+}
+
+/// Strips the git `a/`/`b/` prefix and the trailing timestamp, but keeps the
+/// directory: `b/src/foo.cpp` -> `src/foo.cpp`.  parse_diff uses this so two
+/// files that merely share a basename never collide.
+std::string diff_path_normalized(const std::string& header_path) {
+  std::string p = strip_timestamp(trim(header_path));
+  if (p.size() > 2 && (p[0] == 'a' || p[0] == 'b') && p[1] == '/') p = p.substr(2);
+  return p;
 }
 
 std::string format_line(const std::string& s) {
@@ -178,7 +161,9 @@ Evaluation evaluate_candidate(const std::vector<std::string>& file_lines, std::s
 
 struct SearchOutcome {
   bool found = false;
-  Candidate best;  ///< best.pos is 0-based
+  Candidate best;           ///< best.pos is 0-based
+  bool has_second = false;  ///< set when a second distinct position scored
+  Candidate second;         ///< runner-up, used by ambiguity detection
   Evaluation best_eval;
   std::size_t declared_pos = 0;  ///< 0-based
   /// Largest window radius actually scanned; max_drift means the global scan ran.
@@ -226,9 +211,16 @@ SearchOutcome search_hunk(const std::vector<std::string>& file_lines, std::size_
            distance(pos) == distance(static_cast<std::size_t>(out.best.pos)) &&
            pos < static_cast<std::size_t>(out.best.pos))));
     if (better) {
+      if (out.found) {
+        out.second = out.best;
+        out.has_second = true;
+      }
       out.best = cand;
       out.best_eval = e;
       out.found = true;
+    } else if (!out.has_second || e.score > out.second.score) {
+      out.second = cand;
+      out.has_second = true;
     }
   };
 
@@ -398,7 +390,8 @@ std::vector<DiffFile> PatchEngine::parse_diff(const std::string& unified_diff) {
         raw.rfind("+++", 0) == 0 && i > 0 && lines[i - 1].rfind("---", 0) == 0;
 
     if (starts_file_header || continues_file_header) {
-      const std::string path = diff_path_basename(raw.substr(3));
+      // Keep the directory so `src/foo.cpp` and `tests/foo.cpp` stay distinct.
+      const std::string path = diff_path_normalized(raw.substr(3));
       hunk = nullptr;
       if (raw.rfind("+++", 0) == 0) {
         if (path == "/dev/null" || path.empty()) {
@@ -459,12 +452,42 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
   std::string file_label = target_file_hint;
 
   if (!target_file_hint.empty()) {
-    const std::string want = diff_path_basename(target_file_hint);
-    std::vector<DiffFile> filtered;
+    const std::string want_full = diff_path_normalized(target_file_hint);
+    const std::string want_base = diff_path_basename(target_file_hint);
+
+    // Prefer an exact relative-path match.  A bare basename that matches two
+    // files (src/foo.cpp vs tests/foo.cpp) is ambiguous: guessing would patch
+    // the wrong one, so refuse and ask for the full relative path.
+    std::vector<DiffFile> exact;
+    std::vector<DiffFile> by_name;
     for (const DiffFile& f : files) {
-      if (basename_of(f.path) == want || f.path == target_file_hint) filtered.push_back(f);
+      if (f.path == want_full) {
+        exact.push_back(f);
+      } else if (basename_of(f.path) == want_base) {
+        by_name.push_back(f);
+      }
     }
-    files = std::move(filtered);
+    if (!exact.empty()) {
+      files = std::move(exact);
+    } else if (by_name.size() > 1) {
+      result.all_applied = false;
+      HunkReport report;
+      report.hunk_index = 1;
+      report.status = HunkReport::Status::Failed;
+      std::ostringstream reason;
+      reason << "ambiguous target file '" << target_file_hint << "': the diff contains "
+             << by_name.size() << " files with that basename (";
+      for (std::size_t i = 0; i < by_name.size(); ++i) {
+        if (i != 0) reason << ", ";
+        reason << by_name[i].path;
+      }
+      reason << "). Pass the full relative path, for example '" << by_name.front().path << "'.";
+      report.failure_reason = reason.str();
+      result.reports.push_back(std::move(report));
+      return result;
+    } else {
+      files = std::move(by_name);
+    }
   }
 
   if (files.empty()) {
@@ -540,6 +563,8 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
           outcome.best_eval = global.best_eval;
           outcome.found = true;
           outcome.tried_max = cfg_.max_drift > saved_max ? cfg_.max_drift : saved_max;
+          outcome.has_second = global.has_second;
+          outcome.second = global.second;
         } else if (outcome.tried_max < cfg_.max_drift) {
           outcome.tried_max = cfg_.max_drift;  // the global scan did run
         }
@@ -548,7 +573,16 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       const bool passes_gate =
           outcome.found && outcome.best.score >= cfg_.gate && outcome.best.exact >= 1;
 
-      if (passes_gate) {
+      // Optional ambiguity guard: when the runner-up is almost as good as the
+      // winner the context does not identify one location.  Disabled by default
+      // (ambiguity_margin == 0) so the historical nearest-candidate behaviour is
+      // unchanged.
+      bool ambiguous = false;
+      if (passes_gate && cfg_.ambiguity_margin > 0.0 && outcome.has_second) {
+        if (outcome.best.score - outcome.second.score < cfg_.ambiguity_margin) ambiguous = true;
+      }
+
+      if (passes_gate && !ambiguous) {
         // 0-based element index of the first replaced line.
         const std::size_t pos = static_cast<std::size_t>(outcome.best.pos);
 
@@ -635,33 +669,43 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
       std::ostringstream reason;
       reason.setf(std::ios::fixed);
       reason.precision(2);
-      reason << "score " << report.score << " < gate " << cfg_.gate;
-      if (outcome.found) {
-        reason << ". Declared position line " << report.declared_pos
-               << " but the closest match is line " << report.matched_pos << " (score "
-               << describe_score(outcome.best.score) << ", exact " << outcome.best.exact << "/"
-               << hunk.old_lines.size() << ")";
-      }
-      reason << ". Window tried: +/-0..+/-" << outcome.tried_max << " plus global scan";
-      if (outcome.found && outcome.best_eval.first_mismatch_index >= 0) {
-        const std::size_t sig_index =
-            static_cast<std::size_t>(outcome.best_eval.first_mismatch_index);
-        const std::size_t file_index = static_cast<std::size_t>(outcome.best.pos) + sig_index;
-        const std::string expected = sig_index < hunk.old_lines.size() ? hunk.old_lines[sig_index]
-                                                                       : std::string();
-        const std::string found =
-            file_index < lines.size() ? lines[file_index] : std::string("<end of file>");
-        reason << ". Context mismatch: expected line " << (file_index + 1) << " to contain '"
-               << format_line(expected) << "' but the file has '" << format_line(found) << "'.";
-      } else if (!outcome.found) {
-        const std::string expected =
-            hunk.old_lines.empty() ? std::string() : hunk.old_lines.front();
-        reason << ". No position in the file can hold the hunk context; expected first line '"
-               << format_line(expected) << "'.";
-      }
-      if (outcome.found && outcome.best.exact == 0) {
-        reason << ". The best candidate matched only fuzzily (exact 0), which is below the "
-                  "required exact >= 1.";
+      if (ambiguous) {
+        reason << "ambiguous location: candidates at lines " << (outcome.best.pos + 1)
+               << " and " << (outcome.second.pos + 1) << " score "
+               << describe_score(outcome.best.score) << " and "
+               << describe_score(outcome.second.score) << "; margin "
+               << describe_score(outcome.best.score - outcome.second.score) << " < "
+               << describe_score(cfg_.ambiguity_margin)
+               << ". Provide more surrounding context.";
+      } else {
+        reason << "score " << report.score << " < gate " << cfg_.gate;
+        if (outcome.found) {
+          reason << ". Declared position line " << report.declared_pos
+                 << " but the closest match is line " << report.matched_pos << " (score "
+                 << describe_score(outcome.best.score) << ", exact " << outcome.best.exact << "/"
+                 << hunk.old_lines.size() << ")";
+        }
+        reason << ". Window tried: +/-0..+/-" << outcome.tried_max << " plus global scan";
+        if (outcome.found && outcome.best_eval.first_mismatch_index >= 0) {
+          const std::size_t sig_index =
+              static_cast<std::size_t>(outcome.best_eval.first_mismatch_index);
+          const std::size_t file_index = static_cast<std::size_t>(outcome.best.pos) + sig_index;
+          const std::string expected = sig_index < hunk.old_lines.size() ? hunk.old_lines[sig_index]
+                                                                         : std::string();
+          const std::string found =
+              file_index < lines.size() ? lines[file_index] : std::string("<end of file>");
+          reason << ". Context mismatch: expected line " << (file_index + 1) << " to contain '"
+                 << format_line(expected) << "' but the file has '" << format_line(found) << "'.";
+        } else if (!outcome.found) {
+          const std::string expected =
+              hunk.old_lines.empty() ? std::string() : hunk.old_lines.front();
+          reason << ". No position in the file can hold the hunk context; expected first line '"
+                 << format_line(expected) << "'.";
+        }
+        if (outcome.found && outcome.best.exact == 0) {
+          reason << ". The best candidate matched only fuzzily (exact 0), which is below the "
+                    "required exact >= 1.";
+        }
       }
       report.failure_reason = reason.str();
       result.reports.push_back(std::move(report));
@@ -670,10 +714,6 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
 
   result.new_content = join_lines(lines);
   if (had_trailing_newline && !result.new_content.empty()) result.new_content += '\n';
-  // The hunk text arrives with LF endings even when the file uses CRLF, so an
-  // edit would otherwise convert just the edited line.  That leaves a
-  // mixed-ending file and turns a one-line repair into a whole-file diff.
-  if (crlf_dominant(file_content)) result.new_content = with_crlf_endings(result.new_content);
   result.all_applied = all_applied && !result.reports.empty();
   return result;
 }
@@ -702,10 +742,11 @@ std::string PatchResult::failure_summary(const std::string& file_hint) const {
     os << "- Hunk " << r.hunk_index << ": ";
     switch (r.status) {
       case HunkReport::Status::Applied:
-        os << "APPLIED @ line " << r.matched_pos << " (exact, score " << r.score << ")";
+        os << "MATCHED (not committed) @ line " << r.matched_pos << " (exact, score "
+           << r.score << ")";
         break;
       case HunkReport::Status::FuzzyApplied:
-        os << "APPLIED @ line " << r.matched_pos << " (fuzzy, drift "
+        os << "MATCHED (not committed) @ line " << r.matched_pos << " (fuzzy, drift "
            << (r.matched_pos - r.declared_pos) << ", score " << r.score << ")";
         break;
       case HunkReport::Status::Failed:

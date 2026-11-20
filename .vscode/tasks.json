@@ -1,11 +1,5 @@
 {
   "version": "2.0.0",
-  "options": {
-    "env": {
-      // fixit 自帶 cmake，不必另外安裝；加進 PATH 讓 CMake 內部呼叫得到
-      "PATH": "/Users/alex_wcc/Documents/deepseek-harness/default-workspace/.buildtools/cmake/data/bin:${env:PATH}"
-    }
-  },
   "tasks": [
     {
       "label": "cmake: configure",
@@ -36,11 +30,11 @@
       "label": "cmake: clean rebuild",
       "type": "shell",
       "command": "cmake",
-      "args": ["--build", "${workspaceFolder}/build", "--target", "clean"],
-      "dependsOn": ["cmake: build"],
-      "problemMatcher": [],
+      "args": ["--build", "${workspaceFolder}/build", "--clean-first", "--parallel"],
+      "problemMatcher": ["$gcc"],
+      "group": "build",
       "presentation": { "reveal": "always", "panel": "shared", "clear": true },
-      "detail": "清掉產物後重新完整建置"
+      "detail": "清掉產物後重新完整建置（clean → build，順序正確）"
     },
     {
       "label": "run: fixit --help",
@@ -139,10 +133,9 @@
     {
       "label": "cpp: 單檔編譯目前檔案（小心：多數檔案需 CMake）",
       "type": "shell",
-      "command": "/usr/bin/clang++",
+      "command": "g++",
       "args": [
         "-std=c++20",
-        "-fcolor-diagnostics",
         "-g",
         "${file}",
         "-o",

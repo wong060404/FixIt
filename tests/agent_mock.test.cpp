@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <stdlib.h>  // _putenv_s
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
@@ -28,6 +32,22 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+// setenv()/unsetenv() are POSIX; MinGW/Windows uses _putenv_s().
+inline void set_env_var(const char* name, const char* value) {
+#ifdef _WIN32
+  _putenv_s(name, value);
+#else
+  ::setenv(name, value, 1);
+#endif
+}
+inline void unset_env_var(const char* name) {
+#ifdef _WIN32
+  _putenv_s(name, "");
+#else
+  ::unsetenv(name);
+#endif
+}
 
 std::string example_path(const std::string& name) {
   return std::string(FIXIT_EXAMPLES_DIR) + "/buggy/" + name;
@@ -499,14 +519,14 @@ TEST_CASE("the API key never reaches an artefact", "[agent][security]") {
   write_file(scratch.path() / "victim.cpp", "int main() { return 0 }\n");
 
   const std::string planted = "sk-fixit-canary-0123456789";
-  ::setenv("FIXIT_API_KEY", planted.c_str(), 1);
+  set_env_var("FIXIT_API_KEY", planted.c_str());
 
   const fs::path trace_path = scratch.path() / "trace.json";
   fixit::Agent agent(fixit::make_standard_tools(scratch.path().string(), make_compiler()),
                      std::make_unique<fixit::MockLlm>(), make_compiler(), scratch.path().string());
   agent.set_trace_path(trace_path.string());
   const fixit::AgentResult result = agent.run("victim.cpp", 2);
-  ::unsetenv("FIXIT_API_KEY");
+  unset_env_var("FIXIT_API_KEY");
 
   const std::string trace = slurp(trace_path);
   CHECK_FALSE(trace.empty());

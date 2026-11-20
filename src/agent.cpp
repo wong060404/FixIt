@@ -11,7 +11,6 @@
 
 #include "fixit/codemap.h"
 #include "fixit/patch.h"
-#include "fixit/platform.h"
 
 namespace fixit {
 namespace {
@@ -40,9 +39,9 @@ bool resolve_in_workdir(const std::string& workdir, const std::string& path, std
   if (workdir.empty()) return false;
 
   std::error_code ec;
-  const std::filesystem::path root = std::filesystem::weakly_canonical(to_path(workdir), ec);
+  const std::filesystem::path root = std::filesystem::weakly_canonical(workdir, ec);
   if (ec) return false;
-  const std::filesystem::path candidate = std::filesystem::weakly_canonical(root / to_path(path), ec);
+  const std::filesystem::path candidate = std::filesystem::weakly_canonical(root / path, ec);
   if (ec) return false;
 
   // Require `candidate` to be `root` itself or lie under it.  Comparing path
@@ -51,12 +50,12 @@ bool resolve_in_workdir(const std::string& workdir, const std::string& path, std
   if (relative.empty() && candidate != root) return false;
   if (!relative.empty() && *relative.begin() == "..") return false;
 
-  out = from_path(candidate);
+  out = candidate.string();
   return true;
 }
 
 std::string slurp(const std::string& path, bool& ok) {
-  std::ifstream in(to_path(path), std::ios::binary);
+  std::ifstream in(path, std::ios::binary);
   if (!in) {
     ok = false;
     return {};
@@ -303,7 +302,10 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  if (!ok) return nlohmann::json{{"error", "cannot read " + file}};
 
                  const PatchEngine engine;
-                 const PatchResult result = engine.apply(content, diff, basename_only(file));
+                 // `file` is the path the model supplied, relative to workdir;
+                 // passing it (not the basename) lets apply() disambiguate
+                 // src/foo.cpp from tests/foo.cpp.
+                 const PatchResult result = engine.apply(content, diff, file);
 
                  // A diff that parses to nothing is the one failure the engine
                  // cannot describe (there is no hunk to report on), and it is the
@@ -315,6 +317,7 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                    std::string echo = diff.size() > 600 ? diff.substr(0, 600) + "…" : diff;
                    return nlohmann::json{
                        {"all_applied", false},
+                       {"committed", false},
                        {"reports", nlohmann::json::array()},
                        {"error", "the diff produced no hunks: no line matched the unified-diff "
                                  "header pattern. Expected lines like `--- a/file`, `+++ b/file` "
@@ -328,10 +331,33 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                             "  Expected: --- a/file / +++ b/file / @@ -N,M +N,M @@ then ' ', '-' "
                             "and '+' lines.\n  Received (first 600 bytes):\n" + echo + "\n"}};
                  }
+                 bool committed = false;
                  if (result.all_applied) {
-                   std::ofstream out(to_path(resolved), std::ios::binary | std::ios::trunc);
-                   if (!out) return nlohmann::json{{"error", "cannot write " + file}};
-                   out << result.new_content;
+                   // Atomic replace: write a sibling temp file, flush it, then
+                   // rename over the original.  A crash or a full disk cannot
+                   // leave a truncated source file behind.
+                   const std::filesystem::path target(resolved);
+                   const std::filesystem::path temp = target.string() + ".tmp";
+                   {
+                     std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+                     if (!out) return nlohmann::json{{"error", "cannot write " + file}};
+                     out.write(result.new_content.data(),
+                               static_cast<std::streamsize>(result.new_content.size()));
+                     out.flush();
+                     if (!out) {
+                       std::error_code cleanup;
+                       std::filesystem::remove(temp, cleanup);
+                       return nlohmann::json{{"error", "write failed for " + file}};
+                     }
+                   }
+                   std::error_code rename_error;
+                   std::filesystem::rename(temp, target, rename_error);
+                   if (rename_error) {
+                     std::error_code cleanup;
+                     std::filesystem::remove(temp, cleanup);
+                     return nlohmann::json{{"error", "cannot replace " + file}};
+                   }
+                   committed = true;
                  }
 
                  nlohmann::json reports = nlohmann::json::array();
@@ -352,6 +378,7 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                  }
                  return nlohmann::json{
                      {"all_applied", result.all_applied},
+                     {"committed", committed},
                      {"reports", std::move(reports)},
                      {"failure_summary", result.failure_summary(basename_only(file))}};
                });
@@ -529,7 +556,7 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
 
   result.errors_fixed = errors_fixed_;
   if (!trace_path_.empty()) {
-    std::ofstream out(to_path(trace_path_), std::ios::binary | std::ios::trunc);
+    std::ofstream out(trace_path_, std::ios::binary | std::ios::trunc);
     if (out) out << trace.dump(2) << "\n";
   }
   return result;

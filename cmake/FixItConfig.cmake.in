@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# All third-party dependencies are vendored and exported alongside the library,
+# so there is nothing to find_dependency() here.
+include("${CMAKE_CURRENT_LIST_DIR}/FixItTargets.cmake")
+
+check_required_components(FixIt)

@@ -15,11 +15,28 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <stdlib.h>  // _putenv_s
+#else
+#include <sys/wait.h>  // WIFEXITED / WEXITSTATUS
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 
 namespace {
 
 namespace fs = std::filesystem;
+
+/// Windows' pclose() already returns the process exit code; POSIX returns a
+/// wait status that must be decoded.  MinGW has popen()/pclose() and getpid(),
+/// but not the WIFEXITED/WEXITSTATUS macros.
+inline int exit_code_from_pclose(int status) {
+#ifdef _WIN32
+  return status;
+#else
+  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+}
 
 /// Absolute path of the CLI under test (set by CMake).
 std::string cli_path() { return std::string(FIXIT_CLI_PATH); }
@@ -32,10 +49,22 @@ struct Run {
 /// Runs the CLI with `args` and captures merged stdout/stderr.
 Run run_cli(const std::vector<std::string>& args, const std::string& cwd = {}) {
   std::string command;
-  if (!cwd.empty()) command += "cd " + cwd + " && ";
+  if (!cwd.empty()) {
+#ifdef _WIN32
+    command += "cd /d \"" + cwd + "\" && ";
+#else
+    command += "cd \"" + cwd + "\" && ";
+#endif
+  }
   command += "\"" + cli_path() + "\"";
   for (const std::string& arg : args) command += " \"" + arg + "\"";
   command += " 2>&1";
+#ifdef _WIN32
+  // `cmd /c` strips the first and last quote when the line holds more than two
+  // quotes, which corrupts `"exe" "arg"`.  One extra pair makes cmd strip that
+  // pair instead, leaving the real command (and its 2>&1) intact.
+  command = "\"" + command + "\"";
+#endif
 
   Run result;
   FILE* pipe = ::popen(command.c_str(), "r");
@@ -46,7 +75,7 @@ Run run_cli(const std::vector<std::string>& args, const std::string& cwd = {}) {
     result.output.append(buffer, read);
   }
   const int status = ::pclose(pipe);
-  result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  result.exit_code = exit_code_from_pclose(status);
   return result;
 }
 
@@ -107,11 +136,20 @@ TEST_CASE("usage errors exit 2", "[cli]") {
   }
 
   SECTION("openai without a key") {
-    // FIXIT_API_KEY must be scrubbed for this invocation, so build the command
-    // with an explicit `env -u`.
-    // The file must exist: the key check happens after the file check.
+    // The key check happens after the file check, so the file must exist.
     const fs::path present = scratch.path() / "present.cpp";
     write(present, "int main() { return 0; }\n");
+    // FIXIT_API_KEY must be scrubbed for this invocation.  POSIX has `env -u`;
+    // Windows cmd.exe does not, so clear it in this process for the call.
+#ifdef _WIN32
+    const std::string saved_key = [] {
+      const char* v = std::getenv("FIXIT_API_KEY");
+      return v == nullptr ? std::string() : std::string(v);
+    }();
+    _putenv_s("FIXIT_API_KEY", "");
+    const Run run = run_cli({present.string(), "--agent", "--llm", "openai"});
+    _putenv_s("FIXIT_API_KEY", saved_key.c_str());
+#else
     const std::string command = "env -u FIXIT_API_KEY \"" + cli_path() + "\" \"" +
                                 present.string() + "\" --agent --llm openai 2>&1";
     Run run;
@@ -123,7 +161,8 @@ TEST_CASE("usage errors exit 2", "[cli]") {
       run.output.append(buffer, read);
     }
     const int status = ::pclose(pipe);
-    run.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    run.exit_code = exit_code_from_pclose(status);
+#endif
     CHECK(run.exit_code == 2);
     CHECK(run.output.find("requires --api-key") != std::string::npos);
   }

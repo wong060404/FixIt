@@ -144,6 +144,8 @@ TEST_CASE("syntax errors are detected", "[codemap]") {
     CHECK(map.line_count() == 0);
     CHECK(map.functions().empty());
     CHECK(map.includes().empty());
+    // An empty translation unit is valid C++, so this must be FALSE now.
+    CHECK_FALSE(map.has_syntax_errors());
   }
 
   SECTION("a missing file degrades instead of throwing") {

@@ -19,14 +19,6 @@
 // underscore-prefixed equivalents are the same functions.
 #include <io.h>
 #include <process.h>
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <shellapi.h>  // CommandLineToArgvW
 #define fixit_getpid ::_getpid
 #define fixit_isatty ::_isatty
 #define fixit_fileno ::_fileno
@@ -41,7 +33,6 @@
 #include "fixit/codemap.h"
 #include "fixit/compiler.h"
 #include "fixit/patch.h"
-#include "fixit/platform.h"
 
 namespace {
 
@@ -272,7 +263,7 @@ void classify(const fixit::HunkReport& report, Metrics& metrics) {
 
 void write_metrics(const std::string& path, const Metrics& metrics, bool success, int iterations,
                    double seconds) {
-  std::ofstream out(fixit::to_path(path), std::ios::binary | std::ios::trunc);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
   if (!out) {
     std::cerr << "fixit: cannot write metrics to " << path << "\n";
     return;
@@ -287,110 +278,38 @@ void write_metrics(const std::string& path, const Metrics& metrics, bool success
   os << "  \"total_hunks\": " << metrics.total_hunks << ",\n";
   os << "  \"failed_hunks\": " << metrics.failed_hunks << ",\n";
   os << "  \"fix_rate\": " << (success ? "1.0" : "0.0") << ",\n";
+  // Single-run iteration count.  `iterations` is the accurate name; the legacy
+  // `avg_iterations` key is kept so existing benchmark scripts keep parsing.
+  // A multi-run benchmark should aggregate `iterations` itself.
+  os << "  \"iterations\": " << iterations << ",\n";
   os << "  \"avg_iterations\": " << iterations << ",\n";
   os << "  \"total_time_ms\": " << static_cast<long long>(seconds * 1000.0) << "\n";
   os << "}\n";
   out << os.str();
 }
 
-void print_error_list(const std::vector<fixit::Diagnostic>& diagnostics, const std::string& indent,
-                      const std::string& target_basename) {
+void print_error_list(const std::vector<fixit::Diagnostic>& diagnostics, const std::string& indent) {
   std::size_t index = 0;
   for (const fixit::Diagnostic& d : diagnostics) {
     if (d.level != fixit::DiagLevel::Error) continue;
     std::ostringstream label;
     label << "[E" << ++index << "]";
-    // A diagnostic can point into an included header.  Printing only the line
-    // number would attribute it to the file named on the command line, and the
-    // code map would then look for its enclosing function in the wrong file.
-    if (!d.file.empty() && basename_of(d.file) != target_basename) {
-      std::printf("%s%-6s %s:%d %s\n", indent.c_str(), label.str().c_str(),
-                  basename_of(d.file).c_str(), d.line, d.message.c_str());
-      continue;
-    }
     std::printf("%s%-6s L%-4d %s\n", indent.c_str(), label.str().c_str(), d.line, d.message.c_str());
   }
 }
 
-void print_errors(const fixit::CompileResult& result, const std::string& indent,
-                  const std::string& target_basename) {
-  print_error_list(result.diagnostics, indent, target_basename);
+void print_errors(const fixit::CompileResult& result, const std::string& indent) {
+  print_error_list(result.diagnostics, indent);
 }
 
 }  // namespace
 
-#ifdef _WIN32
-/// Rebuilds argv as UTF-8 from the wide command line.
-///
-/// The CRT converts GetCommandLineW() into the ANSI code page before `main` sees
-/// it, so on a CJK or accented Windows install every non-ASCII argument arrives
-/// as mojibake -- and a path built from those bytes either throws inside
-/// std::filesystem or names a file nobody asked for.  Recovering the UTF-16
-/// command line is the only way to see the name the user actually typed.
-/// The storage is static because the returned pointers are used until exit.
-std::vector<char*>& utf8_argv_from_command_line(int& argc) {
-  static std::vector<std::string> owned;
-  static std::vector<char*> pointers;
-  owned.clear();
-  pointers.clear();
-  int wide_argc = 0;
-  LPWSTR* wide = ::CommandLineToArgvW(::GetCommandLineW(), &wide_argc);
-  if (wide == nullptr) return pointers;
-  owned.reserve(static_cast<std::size_t>(wide_argc));
-  for (int i = 0; i < wide_argc; ++i) {
-    const int length = ::WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, nullptr, 0, nullptr, nullptr);
-    if (length <= 1) {
-      owned.emplace_back();
-      continue;
-    }
-    std::string argument(static_cast<std::size_t>(length), '\0');
-    ::WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, argument.data(), length, nullptr, nullptr);
-    argument.resize(static_cast<std::size_t>(length) - 1);  // drop the terminator
-    owned.push_back(argument);
-  }
-  ::LocalFree(wide);
-  argc = wide_argc;
-  for (std::string& argument : owned) pointers.push_back(argument.data());
-  return pointers;
-}
-
-/// Sets the console code page to UTF-8 for the lifetime of the object and
-/// restores the previous one afterwards.  FixIt's output is UTF-8 by
-/// construction; on a CJK console it rendered as mojibake unless the user ran
-/// `chcp 65001` first -- a step the manual had to spell out.
-class ScopedConsoleUtf8 {
- public:
-  ScopedConsoleUtf8() : previous_(::GetConsoleOutputCP()) { ::SetConsoleOutputCP(CP_UTF8); }
-  ~ScopedConsoleUtf8() {
-    if (previous_ != 0) ::SetConsoleOutputCP(previous_);
-  }
-  ScopedConsoleUtf8(const ScopedConsoleUtf8&) = delete;
-  ScopedConsoleUtf8& operator=(const ScopedConsoleUtf8&) = delete;
-
- private:
-  UINT previous_;
-};
-#endif  // _WIN32
-
 int main(int argc, char** argv) {
-#ifdef _WIN32
-  {
-    int wide_argc = argc;
-    std::vector<char*>& recovered = utf8_argv_from_command_line(wide_argc);
-    if (!recovered.empty()) {
-      argv = recovered.data();
-      argc = wide_argc;
-    }
-  }
-#endif
   // Exit code 3 is documented as "internal error".  Until now nothing could
   // return it, so a std::bad_alloc or a library type_error escaped main and the
   // process died with a signal instead -- indistinguishable from a crash caused
   // by the user's own file.  Report it as the documented code.
   try {
-#ifdef _WIN32
-    const ScopedConsoleUtf8 console_utf8;
-#endif
 
     if (const char* no_colour = std::getenv("NO_COLOR"); no_colour != nullptr && *no_colour != '\0') {
       g_colour = false;
@@ -413,11 +332,11 @@ int main(int argc, char** argv) {
       // reports nothing for it -- which used to read as "clean".  Require a
       // regular file so an obvious typo can never look like a passing build.
       std::error_code error;
-      if (!std::filesystem::is_regular_file(fixit::to_path(options.file), error)) {
+      if (!std::filesystem::is_regular_file(options.file, error)) {
         std::cerr << "fixit: '" << options.file << "' is not a readable file\n";
         return 2;
       }
-      std::ifstream probe(fixit::to_path(options.file), std::ios::binary);
+      std::ifstream probe(options.file, std::ios::binary);
       if (!probe) {
         std::cerr << "fixit: cannot open '" << options.file << "'\n";
         return 2;
@@ -437,54 +356,46 @@ int main(int argc, char** argv) {
       return 2;
     }
 
-    // Flags go to the compiler *and* to the echoed command line, so the two can
-    // never disagree.
-    std::vector<std::string> extra_flags = options.extra_flags;
+    fixit::CompilerConfig config;
+    config.compiler = options.compiler;
+    config.extra_flags = options.extra_flags;
+    if (options.no_write) {
+      // The repair runs on a scratch copy in a temp directory, so a header that
+      // sits next to the original source would no longer be found.  Keep the
+      // original directory on the include path.
+      config.extra_flags.push_back("-I" + dirname_of(options.file));
+    }
+    const fixit::Compiler compiler(config);
 
     // --no-write repairs a private copy in a scratch directory, so the working
     // tree is byte-identical afterwards and the demo can be repeated verbatim.
+    //
+    // ScratchGuard is RAII: it removes the directory on *every* exit path,
+    // including the --outline early return and any exception.  The previous
+    // manual cleanup lambda was only called on two paths and therefore leaked
+    // the scratch directory in --outline mode.
     std::string scratch_dir;
     std::string target_file = options.file;
     if (options.no_write) {
       std::error_code error;
       const std::filesystem::path scratch =
           std::filesystem::temp_directory_path(error) /
-          fixit::to_path("fixit-no-write-" + std::to_string(fixit_getpid()));
+          ("fixit-no-write-" + std::to_string(fixit_getpid()));
       std::filesystem::create_directories(scratch, error);
-      const std::filesystem::path copy = scratch / fixit::to_path(basename_of(options.file));
-      std::filesystem::copy_file(fixit::to_path(options.file), copy,
+      std::filesystem::copy_file(options.file, scratch / basename_of(options.file),
                                  std::filesystem::copy_options::overwrite_existing, error);
-      scratch_dir = fixit::from_path(scratch);
-      target_file = fixit::from_path(copy);
-      // The copy lives in a scratch directory, so a relative #include inside the
-      // file no longer resolves: the original directory has to stay on the
-      // include path, or every project header turns into a phantom
-      // "No such file or directory" that the real build does not have.  A file
-      // named without any directory ("main.cpp") lives in the current directory,
-      // which therefore has to be made absolute first.
-      std::error_code cwd_error;
-      std::string original_dir = dirname_of(options.file);
-      if (original_dir.empty() || original_dir == ".") {
-        original_dir = fixit::from_path(std::filesystem::current_path(cwd_error));
-      }
-      if (!original_dir.empty()) {
-        extra_flags.push_back("-iquote");
-        extra_flags.push_back(original_dir);
-        extra_flags.push_back("-I");
-        extra_flags.push_back(original_dir);
-      }
+      scratch_dir = scratch.string();
+      target_file = (scratch / basename_of(options.file)).string();
     }
-
-    fixit::CompilerConfig config;
-    config.compiler = options.compiler;
-    config.extra_flags = extra_flags;
-    const fixit::Compiler compiler(config);
-    const auto cleanup_scratch = [&] {
-      if (!scratch_dir.empty()) {
-        std::error_code error;
-        std::filesystem::remove_all(scratch_dir, error);
+    struct ScratchGuard {
+      std::filesystem::path path;
+      ~ScratchGuard() {
+        if (!path.empty()) {
+          std::error_code error;
+          std::filesystem::remove_all(path, error);
+        }
       }
-    };
+    } scratch_guard{scratch_dir};
 
     const std::string display_file = basename_of(options.file);
     const std::string workdir = options.no_write ? scratch_dir : dirname_of(options.file);
@@ -528,18 +439,10 @@ int main(int argc, char** argv) {
     // ---- compile-only mode ---------------------------------------------------
     if (!options.agent) {
       const fixit::CompileResult result = compiler.compile(target_file);
-      cleanup_scratch();
       std::cout << "══ FixIt v" << kVersion << " · compile mode (" << options.compiler << ") ══\n\n";
       std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only";
-      for (const std::string& flag : extra_flags) std::cout << " " << flag;
+      for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
       std::cout << " " << display_file << "\n";
-      if (result.exit_code == 127) {
-        // Documented as exit code 127.  It used to be rendered as "✗ 0 errors",
-        // which reads like a clean file with a formatting bug.
-        std::cout << "  " << red("✗ the compiler could not be executed") << "\n";
-        std::cout << "    check --compiler (currently '" << options.compiler << "') or PATH\n";
-        return 127;
-      }
       if (result.clean()) {
         std::cout << "  " << green("✓ clean") << "\n";
         return 0;
@@ -547,7 +450,7 @@ int main(int argc, char** argv) {
       std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
                                (result.error_count() == 1 ? " error" : " errors"))
                 << "\n";
-      print_errors(result, "    ", display_file);
+      print_errors(result, "    ");
       return 1;
     }
 
@@ -572,9 +475,6 @@ int main(int argc, char** argv) {
     fixit::Agent agent(std::move(tools), std::move(llm), compiler, workdir);
     agent.set_trace_path(options.trace);
 
-    // Set when the compiler could not be started at all (exit code 127).
-    bool compiler_unavailable = false;
-
     Metrics metrics;
     // One compile per iteration is printed.  The engine re-compiles to verify a
     // patch, which can report the identical state; that duplicate is folded into
@@ -590,9 +490,6 @@ int main(int argc, char** argv) {
       return os.str();
     };
     agent.set_observer([&](const fixit::Agent::Event& event) {
-      if (event.kind == fixit::Agent::Event::Kind::Compile && event.compile.exit_code == 127) {
-        compiler_unavailable = true;
-      }
       if (!options.verbose) return;  // metrics are collected after the run
 
       if (event.kind == fixit::Agent::Event::Kind::Compile) {
@@ -603,7 +500,7 @@ int main(int argc, char** argv) {
           if (fingerprint == last_fingerprint) return;
           last_fingerprint = fingerprint;
           std::cout << "$ " << options.compiler << " -fsyntax-only";
-        for (const std::string& flag : extra_flags) std::cout << " " << flag;
+        for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
         std::cout << " " << display_file << "\n";
           if (event.compile.clean()) {
             std::cout << "  " << green("✓ clean") << "\n";
@@ -612,7 +509,7 @@ int main(int argc, char** argv) {
             std::cout << "  " << red("✗ " + std::to_string(errors) +
                                      (errors == 1 ? " error" : " errors"))
                       << "\n";
-            print_errors(event.compile, "    ", display_file);
+            print_errors(event.compile, "    ");
           }
           return;
         }
@@ -625,7 +522,7 @@ int main(int argc, char** argv) {
         last_fingerprint = fingerprint;
 
         std::cout << "$ " << options.compiler << " -fsyntax-only";
-        for (const std::string& flag : extra_flags) std::cout << " " << flag;
+        for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
         std::cout << " " << display_file << "\n";
         if (event.compile.clean()) {
           std::cout << "  " << green("✓ clean") << "\n";
@@ -634,22 +531,11 @@ int main(int argc, char** argv) {
         const std::size_t errors = event.compile.error_count();
         std::cout << "  " << red("✗ " + std::to_string(errors) + (errors == 1 ? " error" : " errors"))
                   << "\n";
-        print_errors(event.compile, "    ", display_file);
+        print_errors(event.compile, "    ");
 
         if (!event.compile.diagnostics.empty()) {
-          const fixit::Diagnostic& first = event.compile.diagnostics.front();
-          if (!first.file.empty() && basename_of(first.file) != display_file) {
-            // The error is in an included header: its line number means nothing
-            // in the file being repaired, so report the location instead of
-            // mapping it onto an unrelated function of the wrong file.
-            std::cout << "  " << yellow("→ context: " + basename_of(first.file) + ":" +
-                                        std::to_string(first.line) +
-                                        " (included header, not the file under repair)")
-                      << "\n";
-            return;
-          }
           fixit::CodeMap map(target_file);
-          if (const auto fn = map.enclosing_function(first.line, 1)) {
+          if (const auto fn = map.enclosing_function(event.compile.diagnostics.front().line, 1)) {
             std::cout << "  " << yellow("→ context: fn " + fn->name + "() [L" +
                                         std::to_string(fn->start_line) + "–L" +
                                         std::to_string(fn->end_line) + "]")
@@ -682,13 +568,6 @@ int main(int argc, char** argv) {
     });
 
     const fixit::AgentResult result = agent.run(display_file, options.iterations);
-    cleanup_scratch();
-
-    if (compiler_unavailable) {
-      std::cerr << "fixit: cannot execute the compiler '" << options.compiler
-                << "' (exit code 127); check --compiler or PATH\n";
-      return 127;
-    }
 
     // Single source of truth for the counters: the patches the loop recorded.
     for (const auto& [round, patch] : result.patches) {
@@ -713,7 +592,7 @@ int main(int argc, char** argv) {
                      suffix) << "\n";
     if (!result.final_errors.empty()) {
       std::cout << "  remaining errors:\n";
-      print_error_list(result.final_errors, "    ", display_file);
+      print_error_list(result.final_errors, "    ");
     }
     return 1;
 

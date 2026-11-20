@@ -5,8 +5,15 @@
 # build fully reproducible and offline.  If a component is missing (for example
 # in a fresh clone that was not made with --recursive, or when FIXIT_FETCH_DEPS
 # is ON) FetchContent pulls the exact same tag from upstream.
+#
+# Include directories are split into a BUILD_INTERFACE (the vendored source tree)
+# and an INSTALL_INTERFACE (where `cmake --install` puts the headers) so that the
+# exported targets work from an installed tree, not just from this checkout.
 # ---------------------------------------------------------------------------
 include(FetchContent)
+include(GNUInstallDirs)
+
+set(FIXIT_THIRD_PARTY_INSTALL_INCLUDE "${CMAKE_INSTALL_INCLUDEDIR}/fixit/third_party")
 
 # FetchContent creates the target itself; in that case we only alias it.
 set(FIXIT_FETCHED_TARGETS "")
@@ -59,7 +66,9 @@ else()
        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter/lib/src/lib.c")
   add_library(fixit_tree_sitter STATIC ${_ts_sources})
   target_include_directories(fixit_tree_sitter
-    SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter/lib/include"
+    SYSTEM PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter/lib/include>
+      $<INSTALL_INTERFACE:${FIXIT_THIRD_PARTY_INSTALL_INCLUDE}/tree-sitter>
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter/lib/src")
   target_compile_definitions(fixit_tree_sitter PRIVATE
     _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE _DARWIN_C_SOURCE)
@@ -80,8 +89,11 @@ else()
   add_library(fixit_tree_sitter_cpp STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter-cpp/src/parser.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter-cpp/src/scanner.c")
+  # The grammar's own headers (tree_sitter/parser.h) are needed only while
+  # compiling parser.c/scanner.c, so this stays PRIVATE: a consumer of FixIt
+  # never includes them, and exporting an install path for them would point at a
+  # directory the install rules do not create.
   target_include_directories(fixit_tree_sitter_cpp
-    SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter-cpp/src"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tree-sitter-cpp/src")
   target_link_libraries(fixit_third_party INTERFACE fixit_tree_sitter_cpp)
 endif()
@@ -92,7 +104,9 @@ if(TARGET nlohmann_json::nlohmann_json)
 else()
   add_library(fixit_json INTERFACE)
   target_include_directories(fixit_json
-    SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/json/include")
+    SYSTEM INTERFACE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/json/include>
+      $<INSTALL_INTERFACE:${FIXIT_THIRD_PARTY_INSTALL_INCLUDE}/json>)
   target_link_libraries(fixit_third_party INTERFACE fixit_json)
 endif()
 
@@ -106,7 +120,9 @@ if(TARGET httplib::httplib)
 else()
   add_library(fixit_httplib INTERFACE)
   target_include_directories(fixit_httplib
-    SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpp-httplib")
+    SYSTEM INTERFACE
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpp-httplib>
+      $<INSTALL_INTERFACE:${FIXIT_THIRD_PARTY_INSTALL_INCLUDE}/cpp-httplib>)
   if(FIXIT_ENABLE_OPENSSL)
     find_package(OpenSSL REQUIRED)
     target_compile_definitions(fixit_httplib INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
