@@ -1,4 +1,5 @@
 #include "fixit/codemap.h"
+#include "fixit/platform.h"
 
 #include <optional>
 #include <vector>
@@ -104,7 +105,7 @@ CodeMap::CodeMap(const std::string& file_path) : impl_(std::make_unique<Impl>())
 
   // std::filesystem::path opens through the native wide API on Windows, so a
   // UTF-8 path under a non-ASCII directory works.
-  std::ifstream in(std::filesystem::path(file_path), std::ios::binary);
+  std::ifstream in(to_path(file_path), std::ios::binary);
   if (!in) return;
   std::ostringstream buffer;
   buffer << in.rdbuf();

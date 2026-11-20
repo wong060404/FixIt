@@ -123,16 +123,38 @@ else()
     SYSTEM INTERFACE
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpp-httplib>
       $<INSTALL_INTERFACE:${FIXIT_THIRD_PARTY_INSTALL_INCLUDE}/cpp-httplib>)
-  if(FIXIT_ENABLE_OPENSSL)
+  set(FIXIT_TLS_ACTIVE FALSE)
+  if(FIXIT_TLS STREQUAL "openssl")
     find_package(OpenSSL REQUIRED)
+  elseif(FIXIT_TLS STREQUAL "auto")
+    find_package(OpenSSL QUIET)
+  endif()
+  if(OpenSSL_FOUND AND NOT FIXIT_TLS STREQUAL "off")
+    message(STATUS "fixit: TLS enabled (OpenSSL ${OpenSSL_VERSION})")
     target_compile_definitions(fixit_httplib INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
     target_link_libraries(fixit_httplib INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+    set(FIXIT_TLS_ACTIVE TRUE)
   else()
+    message(STATUS
+      "fixit: building without TLS; https:// endpoints need -DFIXIT_TLS=openssl")
     target_compile_definitions(fixit_httplib INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT=0)
   endif()
   if(WIN32)
+    # cpp-httplib reaches for CreateFile2 and friends, which MinGW hides unless
+    # _WIN32_WINNT says Windows 10.  tools/windows/build_fixit.ps1 passed these
+    # two defines by hand, so the CMake path silently diverged and failed with
+    # "'::CreateFile2' has not been declared" -- define them on the target both
+    # paths share.
+    target_compile_definitions(fixit_httplib INTERFACE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
     # Plain-HTTP cpp-httplib compiles against Winsock on Windows.
     target_link_libraries(fixit_httplib INTERFACE ws2_32)
+    if(FIXIT_TLS_ACTIVE)
+      # With OpenSSL on Windows, cpp-httplib verifies the peer chain against the
+      # *Windows* certificate store through WinCrypt (CertGetCertificateChain and
+      # friends).  Those symbols live in crypt32, so a TLS-enabled MinGW build
+      # fails to link without it -- a plain http build never notices.
+      target_link_libraries(fixit_httplib INTERFACE crypt32)
+    endif()
   endif()
   target_link_libraries(fixit_third_party INTERFACE fixit_httplib)
 endif()
