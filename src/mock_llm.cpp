@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "fixit/agent.h"
+#include "fixit/platform.h"
 
 namespace fixit {
 namespace {
@@ -70,7 +71,7 @@ bool contains(const std::string& haystack, const std::string& needle) {
 
 std::vector<std::string> read_all_lines(const std::string& path) {
   std::vector<std::string> lines;
-  std::ifstream in(path);
+  std::ifstream in(to_path(path));
   std::string line;
   while (std::getline(in, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();

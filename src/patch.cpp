@@ -48,6 +48,32 @@ std::string join_lines(const std::vector<std::string>& lines) {
 
 bool ends_with_newline(const std::string& s) { return !s.empty() && s.back() == '\n'; }
 
+/// True when the file's line endings are mostly CRLF.
+bool crlf_dominant(const std::string& content) {
+  std::size_t crlf = 0;
+  std::size_t lf_only = 0;
+  for (std::size_t i = 0; i < content.size(); ++i) {
+    if (content[i] != '\n') continue;
+    if (i > 0 && content[i - 1] == '\r') {
+      ++crlf;
+    } else {
+      ++lf_only;
+    }
+  }
+  return crlf > lf_only;
+}
+
+/// Rewrites bare LF as CRLF, leaving existing CRLF pairs alone.
+std::string with_crlf_endings(const std::string& content) {
+  std::string out;
+  out.reserve(content.size() + content.size() / 16 + 1);
+  for (std::size_t i = 0; i < content.size(); ++i) {
+    if (content[i] == '\n' && (i == 0 || content[i - 1] != '\r')) out.push_back('\r');
+    out.push_back(content[i]);
+  }
+  return out;
+}
+
 std::string basename_of(const std::string& path) {
   std::string p = path;
   // strip a/ or b/ prefix used by git-style diffs
@@ -644,6 +670,10 @@ PatchResult PatchEngine::apply(const std::string& file_content, const std::strin
 
   result.new_content = join_lines(lines);
   if (had_trailing_newline && !result.new_content.empty()) result.new_content += '\n';
+  // The hunk text arrives with LF endings even when the file uses CRLF, so an
+  // edit would otherwise convert just the edited line.  That leaves a
+  // mixed-ending file and turns a one-line repair into a whole-file diff.
+  if (crlf_dominant(file_content)) result.new_content = with_crlf_endings(result.new_content);
   result.all_applied = all_applied && !result.reports.empty();
   return result;
 }

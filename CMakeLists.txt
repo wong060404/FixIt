@@ -47,7 +47,8 @@ add_library(fixit
   src/patch.cpp
   src/agent.cpp
   src/openai_llm.cpp
-  src/mock_llm.cpp)
+  src/mock_llm.cpp
+  src/platform.cpp)
 
 target_include_directories(fixit PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fixit PUBLIC fixit_third_party)
@@ -79,6 +80,11 @@ if(FIXIT_BUILD_CLI)
   add_executable(fixit-cli tools/fixit-cli/main.cpp)
   target_link_libraries(fixit-cli PRIVATE fixit)
   set_target_properties(fixit-cli PROPERTIES OUTPUT_NAME fixit)
+  if(WIN32)
+    # CommandLineToArgvW (the UTF-8 argv reconstruction) lives in shell32.  MinGW
+    # links it implicitly; MSVC does not.
+    target_link_libraries(fixit-cli PRIVATE shell32)
+  endif()
   if(NOT MSVC)
     target_compile_options(fixit-cli PRIVATE -Wall -Wextra -Werror)
   endif()

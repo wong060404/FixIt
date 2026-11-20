@@ -1,4 +1,5 @@
 #include "fixit/compiler.h"
+#include "fixit/platform.h"
 
 #include <cstddef>
 #include <algorithm>
@@ -545,10 +546,15 @@ CapturedProcess run_capture_windows(const std::vector<std::string>& argv, int ti
 
 CapturedProcess run_capture(const std::vector<std::string>& argv, int timeout_seconds) {
 #ifdef _WIN32
-  return run_capture_windows(argv, timeout_seconds);
+  CapturedProcess result = run_capture_windows(argv, timeout_seconds);
 #else
-  return run_capture_posix(argv, timeout_seconds);
+  CapturedProcess result = run_capture_posix(argv, timeout_seconds);
 #endif
+  // A compiler on Windows writes its diagnostics in the console code page, while
+  // the parsers and every model-facing string are UTF-8.  Output that already is
+  // valid UTF-8 (clang) is returned untouched.
+  result.output = captured_text_to_utf8(result.output);
+  return result;
 }
 
 }  // namespace

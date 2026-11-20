@@ -37,23 +37,38 @@ function Find-FixItRepo {
   throw "FixIt repository not found above $Start"
 }
 
+# winlibs changed its archive layout: older releases unpacked to
+#   <root>\mingw\mingw64\bin
+# and current ones (r3 and later) to
+#   <root>\mingw64\bin
+# Accept either, so a fresh download does not end in "compiler not found".
+function Find-MinWGBin {
+  param([string]$Root)
+  if (-not $Root) { return $null }
+  foreach ($relative in @('mingw64\bin', 'mingw\mingw64\bin')) {
+    $candidate = Join-Path $Root $relative
+    if (Test-Path (Join-Path $candidate 'g++.exe')) { return $candidate }
+  }
+  return $null
+}
+
 $repo = Find-FixItRepo $PSScriptRoot
 $tc = if ($env:FIXIT_TOOLCHAIN) { $env:FIXIT_TOOLCHAIN }
       else { Join-Path (Split-Path -Parent $repo) 'toolchain' }
-if (-not (Test-Path (Join-Path $tc 'mingw\mingw64\bin\g++.exe'))) {
+$mingw = Find-MinWGBin $tc
+if ($null -eq $mingw) {
   $fallback = Join-Path $env:TEMP 'fixit-toolchain'
-  if (Test-Path (Join-Path $fallback 'mingw\mingw64\bin\g++.exe')) {
-    $tc = $fallback
-  } else {
-    Write-Host 'compiler not found. Looked in:'
-    Write-Host "  $tc"
-    Write-Host "  $fallback"
-    Write-Host 'download it first with:'
-    Write-Host "  python `"$(Join-Path $repo 'tools\windows\fetch_mingw.py')`""
-    throw 'no toolchain'
-  }
+  $mingw = Find-MinWGBin $fallback
+  if ($null -ne $mingw) { $tc = $fallback }
 }
-$mingw = Join-Path $tc 'mingw\mingw64\bin'
+if ($null -eq $mingw) {
+  Write-Host 'compiler not found. Looked in:'
+  Write-Host "  $tc"
+  Write-Host "  $(Join-Path $env:TEMP 'fixit-toolchain')"
+  Write-Host 'download it first with:'
+  Write-Host "  python `"$(Join-Path $repo 'tools\windows\fetch_mingw.py')`""
+  throw 'no toolchain'
+}
 $gcc = Join-Path $mingw 'gcc.exe'
 $gpp = Join-Path $mingw 'g++.exe'
 $ar = Join-Path $mingw 'ar.exe'

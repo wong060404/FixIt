@@ -47,9 +47,19 @@ $relayScript = Join-Path $repo 'tools\windows\llm-relay.py'
 $cache = Join-Path $repo '.cache'
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 
+# Same layout tolerance as build_fixit.ps1: winlibs r3 unpacks to <root>\mingw64.
+function Find-MinWGBin {
+  param([string]$Root)
+  if (-not $Root) { return $null }
+  foreach ($relative in @('mingw64\bin', 'mingw\mingw64\bin')) {
+    $candidate = Join-Path $Root $relative
+    if (Test-Path (Join-Path $candidate 'g++.exe')) { return $candidate }
+  }
+  return $null
+}
 $tc = if ($env:FIXIT_TOOLCHAIN) { $env:FIXIT_TOOLCHAIN }
       else { Join-Path (Split-Path -Parent $repo) 'toolchain' }
-if (-not (Test-Path (Join-Path $tc 'mingw\mingw64\bin\g++.exe'))) {
+if ($null -eq (Find-MinWGBin $tc)) {
   $tc = Join-Path $env:TEMP 'fixit-toolchain'
 }
 $keyFile = if ($env:RELAY_KEY_FILE) { $env:RELAY_KEY_FILE }
