@@ -267,13 +267,31 @@ TEST_CASE("the CLI repairs a file end to end through a fake model", "[openai][e2
   command = "\"" + command + "\"";
 #endif
 
+  // Restore the working directory even when an assertion fails: the scratch
+  // directory deletes itself, and a test that later calls current_path() would
+  // otherwise die on a stale cwd.
+  class ScopedCurrentPath {
+   public:
+    explicit ScopedCurrentPath(const std::filesystem::path& path)
+        : previous_(std::filesystem::current_path()) {
+      std::filesystem::current_path(path);
+    }
+    ~ScopedCurrentPath() {
+      std::error_code ignored;
+      std::filesystem::current_path(previous_, ignored);
+    }
+    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
+    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
+
+   private:
+    std::filesystem::path previous_;
+  };
+
   std::string output;
   int exit_code = -1;
   {
-    const std::string previous = std::filesystem::current_path().string();
-    std::filesystem::current_path(scratch.path());
+    const ScopedCurrentPath scoped(scratch.path());
     output = run_cli(command, exit_code);
-    std::filesystem::current_path(previous);
   }
 
   INFO(output);

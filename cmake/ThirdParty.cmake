@@ -113,9 +113,23 @@ endif()
 # --- cpp-httplib (header only) ----------------------------------------------
 # OpenSSL is deliberately NOT a dependency (see docs/decisions.md ADR-004):
 # plain HTTP endpoints (Ollama, vLLM, llama.cpp server, test doubles) are
-# supported out of the box.  Set FIXIT_ENABLE_OPENSSL=ON when a system OpenSSL
+# supported out of the box.  Set -DFIXIT_TLS=openssl when a system OpenSSL
 # is available to also reach https:// endpoints.
 if(TARGET httplib::httplib)
+  # FetchContent brings its own target, so the vendored rules below never run and
+  # FIXIT_TLS would be silently ignored -- asking for TLS and quietly getting a
+  # build without it is worse than failing.
+  set(FIXIT_TLS_ACTIVE FALSE)
+  if(FIXIT_TLS STREQUAL "openssl")
+    find_package(OpenSSL REQUIRED)
+    target_compile_definitions(fixit_third_party INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
+    target_link_libraries(fixit_third_party INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+    set(FIXIT_TLS_ACTIVE TRUE)
+    message(STATUS "fixit: TLS enabled (OpenSSL ${OpenSSL_VERSION})")
+  elseif(NOT FIXIT_TLS STREQUAL "off")
+    message(STATUS "fixit: FetchContent build; TLS follows cpp-httplib's own target "
+                   "(pass -DFIXIT_TLS=openssl to force it)")
+  endif()
   target_link_libraries(fixit_third_party INTERFACE httplib::httplib)
 else()
   add_library(fixit_httplib INTERFACE)

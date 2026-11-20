@@ -376,7 +376,7 @@ powershell -ExecutionPolicy Bypass `
 | 編譯時一堆 `No such file or directory`、`cannot find -lstdc++` | 編譯器被放在中文路徑下 | 把整個 `C:\FixIt` 換成純英文路徑 |
 | `compiler not found. Looked in: ...` | 還沒下載編譯器 | 先做步驟 3 |
 | `the compiler could not be executed (exit code 127)` | `g++` 不在 PATH，也沒用 `--compiler` 指定 | 跑第二部分開頭那三行 |
-| `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` 直接指到 `https://` | 用 C-2 的轉發器，或改用 C-1 的本機模型 |
+| `this build has no TLS support, so an https:// endpoint cannot be reached` | `--base-url` 直接指到 `https://`，而這個組建沒有 TLS | 用 `-DFIXIT_TLS=openssl` 重新組建，或用 C-2 的轉發器，或改用 C-1 的本機模型 |
 | `RELAY_TARGET is not set.` | 沒告訴轉發器要連哪裡 | 先 `$env:RELAY_TARGET = "https://你的端點/v1"` |
 | `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | 已經有一個轉發器在跑 | 直接用那個，或先關掉舊的，或 `-Port 8792` 換一個埠 |
 | `LLM request returned HTTP 401` / `404` | 金鑰錯 / 端點或模型名稱錯 | 用 `probe-endpoint.py` 先確認 |
@@ -414,8 +414,9 @@ gcc 會把自己安裝目錄下的函式庫路徑交給連結器 `ld`。路徑�
 **為什麼要一個本機轉發器？**
 專案刻意不依賴 OpenSSL（決策 ADR-004），所以預設建置沒有 TLS 能力。
 轉發器用 Python 內建的憑證處理走 https，FixIt 端只說純 http。
-若你希望 FixIt 自己連 https，需要做一個帶 OpenSSL 的建置
-（`-DFIXIT_ENABLE_OPENSSL=ON`），並且在 Windows 上用 `FIXIT_CA_BUNDLE` 指定 CA 憑證包。
+若你希望 FixIt 自己連 https，需要做一個帶 OpenSSL 的建置（`-DFIXIT_TLS=openssl`）。
+在 Windows 上憑證鏈是對 **Windows 憑證存放區**驗證，所以不需要 CA 憑證包
+（`FIXIT_CA_BUNDLE` 只是覆寫選項）。
 
 **為什麼要用 `--no-write`？**
 因為 FixIt 預設會直接改你的檔案。先看它打算怎麼改、確認沒問題再套用，比較安全。

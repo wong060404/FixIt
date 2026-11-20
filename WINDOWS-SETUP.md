@@ -394,7 +394,7 @@ Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` intern
 | `No such file or directory`, `cannot find -lstdc++` while building | the toolchain sits under a non-ASCII path | move the whole `C:\FixIt` to a plain ASCII path |
 | `compiler not found. Looked in: ...` | the compiler has not been downloaded | do Step 3 |
 | `the compiler could not be executed (exit code 127)` | `g++` is not on PATH and `--compiler` was not given | run the three lines at the top of Part 2 |
-| `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` points straight at `https://` | use the relay from C-2, or the local model from C-1 |
+| `this build has no TLS support, so an https:// endpoint cannot be reached` | `--base-url` points at `https://` and this build has no TLS | rebuild with `-DFIXIT_TLS=openssl`, use the relay from C-2, or the local model from C-1 |
 | `RELAY_TARGET is not set.` | the relay was not told where to connect | `$env:RELAY_TARGET = "https://your-endpoint/v1"` first |
 | `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | another relay is already running | use it, or stop it, or pass `-Port 8792` |
 | `LLM request returned HTTP 401` / `404` | wrong key / wrong endpoint or model name | check with `probe-endpoint.py` first |
@@ -435,9 +435,10 @@ blaming the generator.
 
 **Why is there a local relay?**
 The project deliberately avoids an OpenSSL dependency (decision ADR-004), so the default
-build has no TLS. The relay uses Python's own certificate handling for https while FixIt
-speaks plain http. If you want FixIt itself to reach https, build with
-`-DFIXIT_ENABLE_OPENSSL=ON` and, on Windows, point `FIXIT_CA_BUNDLE` at a CA bundle.
+build has no TLS by default. The relay uses Python's own certificate handling for https
+while FixIt speaks plain http. If you want FixIt itself to reach https, build with
+`-DFIXIT_TLS=openssl`; on Windows the chain is verified against the Windows certificate
+store, so no CA bundle is needed (`FIXIT_CA_BUNDLE` only overrides it).
 
 **Why `--no-write`?**
 Because FixIt repairs files in place by default. Looking at the intended change first,
