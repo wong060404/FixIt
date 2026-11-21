@@ -49,7 +49,8 @@ add_library(fixit
   src/patch.cpp
   src/agent.cpp
   src/openai_llm.cpp
-  src/mock_llm.cpp)
+  src/mock_llm.cpp
+  src/platform.cpp)
 
 target_include_directories(fixit PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
