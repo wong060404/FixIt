@@ -32,11 +32,13 @@ C:\FixIt\                          <- work folder (plain ASCII path: important!)
 
 ## Before you start: three rules
 
-**Rule 1: the whole path must be plain ASCII — no Chinese characters, no spaces.**
-Use `C:\FixIt`. On Windows, gcc hands its own library directory (an absolute path) to
-the linker, which decodes it in the local code page; a non-ASCII path turns into
-mojibake and you get a pile of confusing `No such file or directory` errors. Getting
-this wrong is the most painful way to fail.
+**Rule 1: keep the toolchain on a plain ASCII path; the checkout and the files you
+repair may contain anything.**
+Use `C:\FixIt`. gcc hands its own library directory (an absolute path) to the linker,
+which decodes it in the local code page, so a **toolchain** under a Chinese path fails
+with a pile of confusing `No such file or directory` errors. Paths with spaces are
+fine, and since the UTF-8 work landed, a checkout and a source file whose names contain
+Chinese characters also build and repair correctly (verified with an MSYS2 GCC).
 
 **Rule 2: do not put it in OneDrive, on the Desktop, or under Documents.**
 The compiler plus build output is roughly 2 GB, which OneDrive will try to sync; and its
@@ -70,10 +72,10 @@ to register anything, run `fixit.cmd` from inside the checkout instead — nothi
 needs to be set up: no `PATH` edit by hand, no environment variable, no `chcp`, no
 CMake, and the checkout may live in any folder on any drive.
 
-The launcher also does three things the tool cannot do for itself: it switches the
-console to UTF-8 for the duration of the run (and restores the previous code page
-afterwards), it puts the discovered compiler on `PATH` for fixit only, and it refuses a
-non-ASCII file argument up front with the two commands that do work.
+The launcher also does two things the tool cannot do for itself: it switches the console
+to UTF-8 for the duration of the run (and restores the previous code page afterwards),
+and it puts the discovered compiler on `PATH` for fixit only. The tool itself converts
+its arguments and file paths through UTF-8, so Chinese file names are supported.
 
 | Launcher-only flag | Effect |
 |---|---|
@@ -83,10 +85,9 @@ non-ASCII file argument up front with the two commands that do work.
 In `cmd.exe`, use `fixit.cmd` with the same arguments. The file being repaired may sit
 in any other project folder, under any folder name, including one with spaces.
 
-> **Non-ASCII paths.** Pass an ASCII path. A file argument containing Chinese
-> characters cannot reach this build (the C++ runtime receives the console code page,
-> not UTF-8). Running from the file's own folder with a relative name does work, and the
-> launcher prints exactly that when it rejects the argument.
+> **Non-ASCII paths.** A source file whose name contains Chinese characters works; it is
+> read, compiled and patched through UTF-8. If gcc itself reports mojibake, the
+> *toolchain* is probably under a non-ASCII path — move it to `C:\FixIt\toolchain`.
 
 ---
 

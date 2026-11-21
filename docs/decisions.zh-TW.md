@@ -857,6 +857,29 @@ fixit。
 仍然以 `0` 結束。在一般使用者帳號下註冊會成功，`fixit.cmd <檔案>` 在任何資料夾都能用
 （另以「把 checkout 放進 `PATH`」的方式驗證：從 `Downloads` 執行 → 結束碼 `0`）。
 
+---
+
+## ADR-037 — 取代 ADR-030 的非 ASCII 限制：路徑現在走 UTF-8
+
+**背景脈絡。** ADR-030 當時記錄：非 ASCII 的檔案參數必須被拒絕，因為 `main` 拿到的
+是主控台內碼頁而不是 UTF-8。在那之後到這次 rebase 之間，上游實作了
+`fixit::platform`（`to_path`／`from_path`、`captured_text_to_utf8`）、啟動時的 UTF-8
+參數轉換、`SetConsoleOutputCP(CP_UTF8)`，以及 UTF-8 的檔案系統 locale。當初依舊行為
+寫的啟動器／建置防護，因此開始拒絕工具現在能正確處理的路徑。
+
+**決策。** 移除這些防護 —— `Test-FixitAsciiPath`、啟動器對非 ASCII 參數的拒絕，以及
+`setup.ps1`／`build_fixit.ps1` 對 checkout 路徑的拒絕 —— 只保留一條值得寫下的規則：
+**工具鏈**必須位於 ASCII 路徑，因為 gcc 會把自己函式庫目錄以本地內碼頁交給連結器；
+checkout 與被修復的檔案則可以含中文。檔案讀取改走 `std::filesystem::path`，讓上游的
+UTF-8 轉換生效。
+
+**理由。** 拒絕一個已被支援的輸入，比錯誤訊息更糟：它會讓工具在原本要服務的使用者
+機器上看起來壞掉。那些防護是為了阻止一個已經不存在的崩潰。
+
+**後果。** rebase 到 `origin/main` 後已驗證：位於 `...\專案資料夾\FixIt` 的 checkout
+可以建置（結束碼 `0`）與修復（結束碼 `0`），名為 `測試.cpp` 的原始檔也能正常修復。
+剩下的非 ASCII 失敗面是工具鏈自己的安裝路徑，指南現在已明確寫出。
+
 
 
 

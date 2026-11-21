@@ -967,6 +967,33 @@ sandbox prints the folder to add to `PATH` and still exits `0`.  On a normal use
 the registration lands, and `fixit.cmd <file>` works from any folder (verified separately
 with the checkout on `PATH`: run from `Downloads` → exit `0`).
 
+---
+
+## ADR-037 — Superseding ADR-030's non-ASCII limit: paths are UTF-8 now
+
+**Context.** ADR-030 recorded that a non-ASCII file argument had to be refused, because
+`main` received the console code page rather than UTF-8.  Between then and this rebase,
+upstream landed `fixit::platform` (`to_path`/`from_path`, `captured_text_to_utf8`), UTF-8
+argument conversion at startup, `SetConsoleOutputCP(CP_UTF8)` and a UTF-8 filesystem
+locale.  The launcher/build guards written against the old behaviour then refused paths
+the tool now handles correctly.
+
+**Decision.** Remove those guards — `Test-FixitAsciiPath`, the launcher's non-ASCII
+argument refusal, and the checkout-path refusals in `setup.ps1`/`build_fixit.ps1` — and
+keep one rule worth stating: the **toolchain** must live on an ASCII path, because gcc
+hands its own library directory to the linker in the local code page; the checkout and
+the files being repaired may contain Chinese characters.  File reads go through
+`std::filesystem::path`, so upstream's UTF-8 conversion applies.
+
+**Rationale.** A guard that rejects a supported input is worse than a bad error message:
+it makes the tool look broken on the machine of exactly the user it was meant for.  The
+guards existed to stop a crash that no longer exists.
+
+**Consequence.** Verified after rebasing onto `origin/main`: a checkout under
+`...\專案資料夾\FixIt` builds (exit `0`) and repairs (exit `0`), and a source file named
+`測試.cpp` is repaired normally.  The remaining non-ASCII failure surface is the
+toolchain's own install path, which the guides now say explicitly.
+
 
 
 
