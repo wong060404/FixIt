@@ -84,8 +84,32 @@ request.add_header("Content-Type", "application/json")
 if KEY:
     request.add_header("Authorization", "Bearer " + KEY)
 
+def trust_store():
+    """A verifying context with a CA bundle the host actually has.
+
+    A python.org interpreter on macOS has neither certifi nor the bundle that
+    `Install Certificates.command` would create, so the default context holds no
+    roots and every valid certificate looks self-signed.  Verification stays on.
+    """
+    context = ssl.create_default_context()
+    if context.get_ca_certs():
+        return context
+    for candidate in (os.environ.get("SSL_CERT_FILE", ""),
+                      "/etc/ssl/cert.pem",
+                      "/etc/ssl/certs/ca-certificates.crt",
+                      "/etc/pki/tls/certs/ca-bundle.crt"):
+        if candidate and os.path.exists(candidate):
+            try:
+                context.load_verify_locations(candidate)
+            except ssl.SSLError:
+                continue
+            if context.get_ca_certs():
+                return context
+    return context
+
+
 try:
-    with urllib.request.urlopen(request, timeout=60, context=ssl.create_default_context()) as response:
+    with urllib.request.urlopen(request, timeout=60, context=trust_store()) as response:
         status, text = response.status, response.read().decode("utf-8", "replace")
 except urllib.error.HTTPError as error:
     status, text = error.code, error.read().decode("utf-8", "replace")

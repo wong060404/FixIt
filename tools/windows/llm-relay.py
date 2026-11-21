@@ -100,8 +100,35 @@ def load_key():
     return key
 
 
+def trust_store():
+    """A verifying TLS context that uses a CA bundle this host actually has.
+
+    A python.org interpreter on macOS ships neither certifi nor the bundle that
+    `Install Certificates.command` would create, so `create_default_context()`
+    loads zero roots and rejects a perfectly valid public certificate with
+    "unable to get local issuer certificate".  Fall back to the bundle macOS
+    ships for its own curl, then to the usual Linux locations.  Verification is
+    never disabled -- an unverifiable endpoint must keep failing.
+    """
+    context = ssl.create_default_context()
+    if context.get_ca_certs():
+        return context
+    for candidate in (os.environ.get("SSL_CERT_FILE", ""),
+                      "/etc/ssl/cert.pem",
+                      "/etc/ssl/certs/ca-certificates.crt",
+                      "/etc/pki/tls/certs/ca-bundle.crt"):
+        if candidate and os.path.exists(candidate):
+            try:
+                context.load_verify_locations(candidate)
+            except ssl.SSLError:
+                continue
+            if context.get_ca_certs():
+                return context
+    return context
+
+
 KEY = load_key()
-SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT = trust_store()
 
 
 def summarise(request_body, response_body):
