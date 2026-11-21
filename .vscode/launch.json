@@ -24,6 +24,26 @@
       ]
     },
     {
+      "name": "fixit CLI: compile current file (show errors, no edit)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/fixit",
+      "args": ["${file}"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "preLaunchTask": "cmake: build",
+      "setupCommands": [
+        {
+          "description": "開啟 gdb 美化列印",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
       "name": "fixit CLI：對目前檔案跑修復流程（--agent --no-write）",
       "type": "cppdbg",
       "request": "launch",
