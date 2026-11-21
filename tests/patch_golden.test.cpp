@@ -420,3 +420,24 @@ TEST_CASE("a refused patch says its matched hunks were not committed",
   const std::string summary = result.failure_summary("f.cpp");
   CHECK(summary.find("MATCHED (not committed)") != std::string::npos);
 }
+// ---------------------------------------------------------------------------
+// Regression: a CRLF file must stay uniformly CRLF after an edit.  A Windows
+// checkout has CRLF sources and expected artefacts, but the hunk text a model
+// emits always uses LF; without this, only the edited line gained LF and
+// expected_artifacts.test compared a mixed-ending file against a pure-CRLF
+// baseline (the windows-latest / msys2-ucrt64 CI job caught it).
+// ---------------------------------------------------------------------------
+TEST_CASE("a CRLF file keeps uniform CRLF endings after an edit", "[patch][crlf]") {
+  const std::string file = "int a = 1;\r\nint b = 2;\r\nint c = 3;\r\n";
+  const std::string diff =
+      "--- a/f.cpp\n+++ b/f.cpp\n"
+      "@@ -1,3 +1,3 @@\n"
+      " int a = 1;\n"
+      "-int b = 2;\n"
+      "+int b = 4;\n"
+      " int c = 3;\n";
+  const fixit::PatchEngine engine;
+  const fixit::PatchResult result = engine.apply(file, diff, "f.cpp");
+  REQUIRE(result.all_applied);
+  CHECK(result.new_content == "int a = 1;\r\nint b = 4;\r\nint c = 3;\r\n");
+}
