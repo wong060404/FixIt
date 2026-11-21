@@ -292,3 +292,36 @@ TEST_CASE("include paths and defines reach the compiler", "[cli]") {
     CHECK(with.exit_code == 0);
   }
 }
+
+TEST_CASE("outline reports syntax errors in its exit code", "[cli][outline]") {
+  Scratch scratch("outline-broken");
+  const fs::path source = scratch.path() / "broken.cpp";
+  write(source, "int main() {\n  int x = 1\n  return x;\n}\n");
+
+  const Run run = run_cli({source.string(), "--outline", "--no-timing"});
+  CHECK(run.output.find("syntax errors") != std::string::npos);
+  CHECK(run.exit_code == 1);
+}
+
+TEST_CASE("outline exits 0 for a clean file", "[cli][outline]") {
+  Scratch scratch("outline-clean");
+  const fs::path source = scratch.path() / "clean.cpp";
+  write(source, "int main() { return 0; }\n");
+
+  const Run run = run_cli({source.string(), "--outline", "--no-timing"});
+  CHECK(run.output.find("no syntax errors") != std::string::npos);
+  CHECK(run.exit_code == 0);
+}
+
+TEST_CASE("warnings are visible without failing the build", "[cli][warnings]") {
+  Scratch scratch("warnings");
+  const fs::path source = scratch.path() / "warn.cpp";
+  write(source, "int main() {\n  int unused = 1;\n  return 0;\n}\n");
+
+  const Run run = run_cli(
+      {source.string(), "--flag", "-Wall", "--no-timing", "--compiler", FIXIT_TEST_COMPILER});
+  INFO(run.output);
+  CHECK(run.exit_code == 0);
+  CHECK(run.output.find("1 warning") != std::string::npos);
+  CHECK(run.output.find("[W1]") != std::string::npos);
+}

@@ -89,8 +89,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --t
 
 > **Windows：** 不需要在全系統安裝任何東西。可攜式的 MinGW-w64 GCC 會由
 > `python tools\windows\fetch_mingw.py` 取得，而
-> `tools\windows\build_fixit.ps1` 不用 CMake 也能建出同樣的兩個執行檔（此處無法
-> 使用 CMake 產生器 —— 原因見該腳本的檔頭說明）。請照著
+> `tools\windows\build_fixit.ps1` 不用 CMake 也能建出同樣的兩個執行檔；那個工具鏈
+> 另外附了 cmake、ninja、gdb，所以 `cmake -B build-cmake -G Ninja` 同樣可行（CI 在
+> Windows 上走的就是這條路，`ctest` 也會跑）。請照著
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md)（或
 > [`WINDOWS-SETUP.zh-TW.md`](WINDOWS-SETUP.zh-TW.md) 中文版）的逐步指南操作，
 > 它從一台乾淨的 Windows 機器開始，最後得到一個已修好的檔案，你可以使用本機
@@ -395,13 +396,26 @@ $ g++ -std=c++20 -fsyntax-only -Iinclude src/parser.cpp
 
 ### 6.6 透過 https 使用真實模型
 
-預設組建沒有 TLS，因為 OpenSSL 不在四個獲准的相依項目之列。因此 `https://`
-端點需要一個啟用 TLS 的組建：
+TLS 是選用的，因為 OpenSSL 不在四個獲准的相依項目之列。由 `FIXIT_TLS` 在設定
+階段決定：
+
+| `-DFIXIT_TLS=` | 行為 |
+|---|---|
+| `auto`（預設） | 找得到系統 OpenSSL 就啟用 TLS，否則不啟用，並在設定階段明確告知 |
+| `openssl` | 必須要有：`apt install libssl-dev`、`brew install openssl`、`vcpkg install openssl`，或 msys2 的 `mingw-w64-ucrt-x86_64-openssl` |
+| `off` | 完全不去找 OpenSSL |
 
 ```bash
-cmake -B build-tls -DCMAKE_BUILD_TYPE=Release -DFIXIT_ENABLE_OPENSSL=ON
+cmake -B build-tls -DCMAKE_BUILD_TYPE=Release -DFIXIT_TLS=openssl
 cmake --build build-tls -j
 ```
+
+純 `http://` 端點（Ollama、llama.cpp、`tools/windows/llm-relay.py`）在任何平台、
+任何組建都能用，與 TLS 無關。
+
+* 在 Windows 上，cpp-httplib 會透過 WinCrypt 用 **Windows 憑證存放區**驗證鏈，
+  所以啟用 TLS 的組建會連結 `crypt32`（CMake 規則已處理），也不需要 CA 憑證包：
+  存放區本來就有這台機器信任的所有根憑證。`FIXIT_CA_BUNDLE` 只是覆寫選項。
 
 `find_package(OpenSSL)` 會找到系統上的 OpenSSL。有兩個 macOS 的細節值得
 知道，兩者都是在這個專案上辛苦摸索出來的：

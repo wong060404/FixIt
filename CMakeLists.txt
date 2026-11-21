@@ -28,7 +28,16 @@ option(FIXIT_BUILD_CLI "Build the fixit command line tool" ON)
 option(FIXIT_FETCH_DEPS
        "Force downloading dependencies with FetchContent even when third_party/ is populated"
        OFF)
-option(FIXIT_ENABLE_OPENSSL "Link cpp-httplib against a system OpenSSL" OFF)
+# TLS for https:// LLM endpoints.  `auto` uses a system OpenSSL when one is
+# found and otherwise builds without TLS -- plain http:// endpoints (Ollama,
+# llama.cpp, tools/windows/llm-relay.py) keep working everywhere either way.
+# `openssl` makes a missing OpenSSL a hard configure error, `off` skips the search.
+set(FIXIT_TLS "auto" CACHE STRING "TLS backend for https:// endpoints: auto|openssl|off")
+set_property(CACHE FIXIT_TLS PROPERTY STRINGS auto openssl off)
+option(FIXIT_ENABLE_OPENSSL "Deprecated spelling of -DFIXIT_TLS=openssl" OFF)
+if(FIXIT_ENABLE_OPENSSL)
+  set(FIXIT_TLS "openssl")
+endif()
 option(FIXIT_MACOS_KEYCHAIN_CERTS "Use the macOS Keychain for CA certificates" ON)
 
 if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
@@ -71,7 +80,7 @@ target_compile_definitions(fixit PUBLIC FIXIT_VERSION="${PROJECT_VERSION}")
 # targets that actually link, rather than only to the INTERFACE library: a static
 # library does not propagate a framework requirement to the final executable on
 # its own.
-if(APPLE AND FIXIT_ENABLE_OPENSSL AND FIXIT_MACOS_KEYCHAIN_CERTS)
+if(APPLE AND FIXIT_TLS_ACTIVE AND FIXIT_MACOS_KEYCHAIN_CERTS)
   find_library(FIXIT_COREFOUNDATION CoreFoundation REQUIRED)
   find_library(FIXIT_SECURITY Security REQUIRED)
   target_link_libraries(fixit PUBLIC "${FIXIT_COREFOUNDATION}" "${FIXIT_SECURITY}")

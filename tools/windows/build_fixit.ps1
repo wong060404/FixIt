@@ -109,6 +109,8 @@ $systemIncludes = @(
 )
 $fixitDefines = @(
   '-DFIXIT_VERSION="0.1.0"',
+  # No TLS in the script build: this toolchain ships no OpenSSL, and the relay
+  # covers https endpoints.  The CMake path can enable it with -DFIXIT_TLS=openssl.
   '-DCPPHTTPLIB_OPENSSL_SUPPORT=0',
   '-D_WIN32_WINNT=0x0A00',
   '-DWINVER=0x0A00'

@@ -11,6 +11,7 @@
 
 #include "fixit/codemap.h"
 #include "fixit/patch.h"
+#include "fixit/platform.h"
 
 namespace fixit {
 namespace {
@@ -39,9 +40,9 @@ bool resolve_in_workdir(const std::string& workdir, const std::string& path, std
   if (workdir.empty()) return false;
 
   std::error_code ec;
-  const std::filesystem::path root = std::filesystem::weakly_canonical(workdir, ec);
+  const std::filesystem::path root = std::filesystem::weakly_canonical(to_path(workdir), ec);
   if (ec) return false;
-  const std::filesystem::path candidate = std::filesystem::weakly_canonical(root / path, ec);
+  const std::filesystem::path candidate = std::filesystem::weakly_canonical(root / to_path(path), ec);
   if (ec) return false;
 
   // Require `candidate` to be `root` itself or lie under it.  Comparing path
@@ -50,14 +51,14 @@ bool resolve_in_workdir(const std::string& workdir, const std::string& path, std
   if (relative.empty() && candidate != root) return false;
   if (!relative.empty() && *relative.begin() == "..") return false;
 
-  out = candidate.string();
+  out = from_path(candidate);
   return true;
 }
 
 std::string slurp(const std::string& path, bool& ok) {
   // filesystem::path opens through the native wide API on Windows, so a UTF-8
   // path under a non-ASCII directory works.
-  std::ifstream in(std::filesystem::path(path), std::ios::binary);
+  std::ifstream in(to_path(path), std::ios::binary);
   if (!in) {
     ok = false;
     return {};
@@ -338,8 +339,8 @@ ToolRegistry make_standard_tools(std::string workdir, Compiler compiler) {
                    // Atomic replace: write a sibling temp file, flush it, then
                    // rename over the original.  A crash or a full disk cannot
                    // leave a truncated source file behind.
-                   const std::filesystem::path target(resolved);
-                   const std::filesystem::path temp = target.string() + ".tmp";
+                   const std::filesystem::path target = to_path(resolved);
+                   const std::filesystem::path temp = to_path(from_path(target) + ".tmp");
                    {
                      std::ofstream out(temp, std::ios::binary | std::ios::trunc);
                      if (!out) return nlohmann::json{{"error", "cannot write " + file}};
@@ -558,7 +559,7 @@ AgentResult Agent::run(const std::string& task, int max_iterations) {
 
   result.errors_fixed = errors_fixed_;
   if (!trace_path_.empty()) {
-    std::ofstream out(trace_path_, std::ios::binary | std::ios::trunc);
+    std::ofstream out(to_path(trace_path_), std::ios::binary | std::ios::trunc);
     if (out) out << trace.dump(2) << "\n";
   }
   return result;

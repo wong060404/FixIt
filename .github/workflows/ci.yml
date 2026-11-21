@@ -18,14 +18,16 @@ jobs:
           # The spec requires gcc 12 and clang 15; both are preinstalled on the
           # runner images, and the requested version is selected explicitly so a
           # future image bump cannot silently change the compiler under test.
-          - name: ubuntu-latest / gcc-12
+          - name: ubuntu-latest / gcc-12 (TLS on)
             os: ubuntu-latest
             cxx: g++-12
             cc: gcc-12
+            tls: openssl
           - name: macos-latest / clang
             os: macos-latest
             cxx: clang++
             cc: clang
+            tls: auto
     steps:
       - name: Check out (with submodules, if any)
         uses: actions/checkout@v4
@@ -35,7 +37,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-12 g++-12
+          # libssl-dev is the OpenSSL the TLS-enabled leg links against, so an
+          # #ifdef CPPHTTPLIB_OPENSSL_SUPPORT block cannot rot unnoticed again.
+          sudo apt-get install -y gcc-12 g++-12 libssl-dev
           g++-12 --version
       - name: Report compiler versions
         run: |
@@ -47,6 +51,7 @@ jobs:
           -DCMAKE_C_COMPILER=${{ matrix.cc }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
           -DFIXIT_TEST_COMPILER=${{ matrix.cxx }}
+          -DFIXIT_TLS=${{ matrix.tls }}
       - name: Build
         run: cmake --build build -j 4
       - name: Test
@@ -74,9 +79,21 @@ jobs:
   # CMake's UTF-8 Makefiles under some locales.  -static makes the produced
   # executables independent of the MinGW runtime DLLs, which matters for the
   # ctest PATH handling.
+  #
+  # Two legs, because TLS is a different code path on Windows: with OpenSSL,
+  # cpp-httplib verifies the chain against the Windows certificate store through
+  # WinCrypt, which needs crypt32 linked.  A plain build never compiles any of
+  # that, so the `openssl` leg is the only thing that would catch a regression
+  # such as the `undefined reference to __imp_CertGetCertificateChain` wall.
   windows:
-    name: windows-latest / msys2-ucrt64
+    name: windows-latest / msys2-ucrt64 (${{ matrix.tls }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tls: auto
+          - tls: openssl
     defaults:
       run:
         shell: msys2 {0}
@@ -94,6 +111,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            ${{ matrix.tls == 'openssl' && 'mingw-w64-ucrt-x86_64-openssl' || '' }}
       - name: Report compiler versions
         run: |
           gcc --version
@@ -105,6 +123,7 @@ jobs:
           -DCMAKE_C_COMPILER=gcc
           -DCMAKE_CXX_COMPILER=g++
           -DFIXIT_TEST_COMPILER=g++
+          -DFIXIT_TLS=${{ matrix.tls }}
           -DCMAKE_EXE_LINKER_FLAGS=-static
       - name: Build
         run: cmake --build build --parallel
@@ -122,4 +141,7 @@ jobs:
                --compiler g++ --no-write; then
             echo "e3 must NOT be fixed by the mock rules"; exit 1
           fi
-          git diff --exit-code
+          # The msys2 shell does not put the runner's Git on PATH, so a bare
+          # `git` here exited 127 *after* all three demos had already passed.
+          GIT="$(command -v git || echo 'C:/Program Files/Git/bin/git.exe')"
+          "$GIT" diff --exit-code

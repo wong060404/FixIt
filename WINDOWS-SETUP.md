@@ -224,7 +224,7 @@ $env:NO_COLOR = "1"
 
 | What those lines do | Why |
 |---|---|
-| `chcp 65001` | switches the console to UTF-8; without it FixIt's box-drawing characters show as mojibake like `鈺愨晲` (cosmetic only) |
+| `chcp 65001` | **no longer needed** — fixit sets the console to UTF-8 itself and restores the previous code page on exit. Keep it only if you also run older builds, whose box-drawing characters showed as mojibake (`鈺愨晲`); it never affected results |
 | `PATH` | lets fixit find `g++`. Alternatively pass `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` every time |
 | `NO_COLOR` | turns off colour so output is easier to copy |
 
@@ -394,13 +394,13 @@ Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` intern
 | `No such file or directory`, `cannot find -lstdc++` while building | the toolchain sits under a non-ASCII path | move the whole `C:\FixIt` to a plain ASCII path |
 | `compiler not found. Looked in: ...` | the compiler has not been downloaded | do Step 3 |
 | `the compiler could not be executed (exit code 127)` | `g++` is not on PATH and `--compiler` was not given | run the three lines at the top of Part 2 |
-| `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` points straight at `https://` | use the relay from C-2, or the local model from C-1 |
+| `this build has no TLS support, so an https:// endpoint cannot be reached` | `--base-url` points at `https://` and this build has no TLS | rebuild with `-DFIXIT_TLS=openssl`, use the relay from C-2, or the local model from C-1 |
 | `RELAY_TARGET is not set.` | the relay was not told where to connect | `$env:RELAY_TARGET = "https://your-endpoint/v1"` first |
 | `cannot listen on 127.0.0.1:8791` / `port 8791 is already serving a relay for a different endpoint` | another relay is already running | use it, or stop it, or pass `-Port 8792` |
 | `LLM request returned HTTP 401` / `404` | wrong key / wrong endpoint or model name | check with `probe-endpoint.py` first |
 | the relay prints `key loaded : no` | the key file is not at `C:\FixIt\FixIt\.secrets\fixit_key` | see C-2 |
 | `tool_calls` is always empty, the model only returns text | the model does not support tool calling | use a model that supports function calling |
-| output looks like `鈺愨晲` or `鉁?` | the console is not UTF-8 | run `chcp 65001` |
+| output looks like mojibake | the console code page is not UTF-8 | current builds set it themselves and restore it; on an older binary run `chcp 65001` |
 | running a `.ps1` says "running scripts is disabled on this system" | PowerShell blocks scripts by default | add `-ExecutionPolicy Bypass`, as in Step 4 |
 | `PATH` stops working after closing the window | environment variables are per-window | see Appendix B |
 
@@ -420,20 +420,25 @@ With a non-ASCII path those bytes are re-decoded in the local code page (936/GBK
 Chinese Windows), so `crt2.o` and `-lstdc++` are all "not found" — and the error message
 never points at the real cause. `C:\FixIt\toolchain` avoids the whole class of problem.
 
-**Why doesn't the Windows build use the project's `cmake`?**
-Two independent problems were hit here. `ninja` blocks forever: it reads each child's
-output pipe until EOF, and in some environments that pipe never closes. `mingw32-make`
-reads the UTF-8 Makefiles CMake writes in the local code page, so a non-ASCII path
-arrives as mojibake and every process launch fails. `build_fixit.ps1` does exactly what
-CMake would do — C via gcc, C++ via g++, the project's own `-Wall -Wextra -Werror` on its
-own code — just without CMake. Linux and macOS users can follow the project README's
-`cmake` flow.
+**Does the Windows build use the project's `cmake`?**
+It can, and CI does. The toolchain `fetch_mingw.py` downloads also carries `cmake`,
+`ninja` and `gdb`, so with that `bin` directory on `PATH`,
+`cmake -B build-cmake -G Ninja` configures, builds and runs `ctest` on Windows.
+`build_fixit.ps1` stays as the fallback that needs nothing but the compiler.
+
+Two historical traps are worth knowing, because both were mistaken for CMake bugs.
+`mingw32-make` reads the UTF-8 Makefiles CMake writes in the local code page, so a
+non-ASCII path arrives as mojibake — use Ninja. And Ninja starts a shell through
+`%COMSPEC%`, so a corrupted `COMSPEC` (on one machine it held an entire `PATH`) makes
+every link step fail with `CreateProcess failed`; check `echo $env:COMSPEC` before
+blaming the generator.
 
 **Why is there a local relay?**
 The project deliberately avoids an OpenSSL dependency (decision ADR-004), so the default
-build has no TLS. The relay uses Python's own certificate handling for https while FixIt
-speaks plain http. If you want FixIt itself to reach https, build with
-`-DFIXIT_ENABLE_OPENSSL=ON` and, on Windows, point `FIXIT_CA_BUNDLE` at a CA bundle.
+build has no TLS by default. The relay uses Python's own certificate handling for https
+while FixIt speaks plain http. If you want FixIt itself to reach https, build with
+`-DFIXIT_TLS=openssl`; on Windows the chain is verified against the Windows certificate
+store, so no CA bundle is needed (`FIXIT_CA_BUNDLE` only overrides it).
 
 **Why `--no-write`?**
 Because FixIt repairs files in place by default. Looking at the intended change first,
