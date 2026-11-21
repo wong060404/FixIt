@@ -145,6 +145,52 @@
       "problemMatcher": ["$gcc"],
       "presentation": { "reveal": "always", "panel": "shared", "clear": true },
       "detail": "只適合完全獨立的單檔。src/ tests/ 需搭配 CMake，examples/buggy/ 是故意寫壞的素材"
+    },
+    {
+      "label": "windows: build (build-win, no CMake)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/tools/windows/build_fixit.ps1"
+      ],
+      "problemMatcher": ["$gcc"],
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "Windows 不需要 CMake：用專案建置腳本，產物在 build-win/bin/"
+    },
+    {
+      "label": "windows: run fixit --help",
+      "type": "shell",
+      "command": "${workspaceFolder}/build-win/bin/fixit.exe",
+      "args": ["--help"],
+      "dependsOn": ["windows: build (build-win, no CMake)"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": false },
+      "detail": "用 build-win 的執行檔顯示 CLI 用法"
+    },
+    {
+      "label": "windows: run fixit outline 目前檔案",
+      "type": "shell",
+      "command": "${workspaceFolder}/build-win/bin/fixit.exe",
+      "args": ["${file}", "--outline"],
+      "dependsOn": ["windows: build (build-win, no CMake)"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": false },
+      "detail": "對目前開啟的檔案印出結構圖（不會改檔）"
+    },
+    {
+      "label": "windows: run fixit --no-write 目前檔案",
+      "type": "shell",
+      "command": "${workspaceFolder}/build-win/bin/fixit.exe",
+      "args": ["${file}", "--agent", "--llm", "mock", "--no-write", "--verbose"],
+      "dependsOn": ["windows: build (build-win, no CMake)"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": false },
+      "detail": "在暫存副本上跑修復流程，不動你的原始檔"
     }
   ]
 }

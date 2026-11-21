@@ -291,6 +291,13 @@ If `F5` ever reports *"Errors exist after running preLaunchTask"*, run
 `cmake: build` once and read the compile output: it is a real compiler error, or
 the wrong kind of file was being compiled in isolation.
 
+On **Windows without CMake**, use the tasks prefixed `windows:`: `windows: build
+(build-win, no CMake)` runs the project's own build script, and the three `windows: run
+fixit …` tasks run the CLI from `build-win/bin/fixit.exe` on the current file. They need no
+CMake, no generator and no `cmake` on `PATH`. F5 debugging still needs `gdb`
+(`pacman -S mingw-w64-ucrt-x86_64-gdb` in MSYS2) and a launch entry pointing at
+`build-win/bin/fixit.exe`.
+
 ## 4. Demo Transcript
 
 Recorded from a real run; the full transcript, with all three examples and every
