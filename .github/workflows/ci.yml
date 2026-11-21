@@ -122,4 +122,7 @@ jobs:
                --compiler g++ --no-write; then
             echo "e3 must NOT be fixed by the mock rules"; exit 1
           fi
-          git diff --exit-code
+                    # The msys2 shell does not put the runner's Git on PATH, so a bare
+          # `git` here exited 127 *after* all three demos had already passed.
+          GIT="$(command -v git || echo 'C:/Program Files/Git/bin/git.exe')"
+          "$GIT" diff --exit-code
