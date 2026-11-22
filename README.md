@@ -17,14 +17,14 @@ exit code.
 
 ### See it working
 
-[![FixIt in 32 seconds — the hook, the structured failure report, and the measured results](docs/fixit_tour.gif)](https://youtu.be/w3c9Fsy27VE)
+[![Watch the 4-minute FixIt introduction on YouTube](https://img.youtube.com/vi/w3c9Fsy27VE/maxresdefault.jpg)](https://youtu.be/w3c9Fsy27VE)
 
 **▶ [Watch the full 4-minute introduction on YouTube](https://youtu.be/w3c9Fsy27VE)** · [local copy](docs/fixit_intro_subs.mp4) · [English subtitles](docs/fixit_intro.srt)
 
-Above is a silent 32-second tour of the whole film, sampled from the narrated
-version. It opens on the problem the project exists to solve: the model's diff is
-correct, and `patch(1)` refuses it with an exit code. Everything below follows
-from closing that loop.
+GitHub does not allow an embedded YouTube player in a README, so the thumbnail
+above opens the video on YouTube. It starts with the problem the project exists to
+solve: the model's diff is correct, and `patch(1)` refuses it with an exit code.
+Everything below follows from closing that loop.
 
 > **New here?** On Windows, start with
 > [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) ([中文](WINDOWS-SETUP.zh-TW.md)): clone, build
@@ -148,7 +148,29 @@ file / no key · `3` internal error · `127` compiler could not be executed.
 See §3 (Quick Start), §6.7 (CLI) and [`WINDOWS-SETUP.md`](WINDOWS-SETUP.md) for the
 step-by-step guide with every expected output.
 
+### 0.5 Real runs (screenshots)
+
+These are renders of **actual runs** on Windows with MSYS2 GCC 16.1.0 — the text is
+the program's own output, not a mock-up.
+
+**Repair.** Two planted bugs (a missing `;` and a missing `<vector>`) are fixed in two
+iterations. The second hunk is declared one line too low and still lands
+(`fuzzy, drift-1`); the final `✓ clean` is a real recompile.
+
+![Recorded FixIt repair run: ten compiler errors, an exact hunk, a fuzzy hunk with drift-1, then clean](docs/fixit-repair.svg)
+
+**Structure without compiling.** `--outline` lists the functions, the includes and the
+lines with syntax errors — useful before touching an unfamiliar file.
+
+![Recorded FixIt outline run: 23 lines, 3 functions, includes and line ranges](docs/fixit-outline.svg)
+
+**The honest failure.** `e3_type_error.cpp` is outside the mock's rules, so FixIt says
+so, lists the remaining errors and exits `1` instead of pretending to have fixed it.
+
+![Recorded FixIt run that reports the file as not fixed, with the remaining errors and exit code 1](docs/fixit-not-fixed.svg)
+
 ---
+
 ## 1. What & Why
 
 Agentic C++ repair has one bottleneck that is not the model: **the patch does

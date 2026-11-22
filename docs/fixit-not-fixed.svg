@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1384" height="312" viewBox="0 0 1384 312" role="img" aria-label="PowerShell — fixit e3_type_error.cpp --agent --llm mock">
+  <title>PowerShell — fixit e3_type_error.cpp --agent --llm mock</title>
+  <rect x="0.5" y="0.5" width="1383" height="311" rx="10" fill="#1e1e1e" stroke="#3c3c3c"/>
+  <path d="M0.5 10.5 A10 10 0 0 1 10.5 0.5 H1373.5 A10 10 0 0 1 1383.5 10.5 V36 H0.5 Z" fill="#323233"/>
+  <circle cx="18" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="36" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="54" cy="18" r="6" fill="#27c93f"/>
+  <text x="692" y="22" text-anchor="middle" font-family="Cascadia Mono,Consolas,'Courier New',monospace" font-size="12" fill="#bbbbbb">PowerShell — fixit e3_type_error.cpp --agent --llm mock</text>
+  <g font-family="Cascadia Mono,Consolas,'Courier New',monospace" font-size="14">
+  <text x="20" y="68" fill="#4ec9b0" xml:space="preserve">══ FixIt v0.1.0 · agent mode (mock) ══</text>
+  <text x="20" y="88" fill="#d4d4d4" xml:space="preserve"> </text>
+  <text x="20" y="108" fill="#569cd6" xml:space="preserve">── iteration 1 ----------------------------</text>
+  <text x="20" y="128" fill="#dcdcaa" xml:space="preserve">$ g++ -fsyntax-only e3_type_error.cpp</text>
+  <text x="20" y="148" fill="#f48771" xml:space="preserve">  ✗ 2 errors</text>
+  <text x="20" y="168" fill="#f48771" xml:space="preserve">    [E1]   L13   invalid initialization of reference of type 'const std::string&amp;' {aka 'const std::__cxx11::basic_string&lt;char&gt;&amp;'} from expression of type 'int'</text>
+  <text x="20" y="188" fill="#f48771" xml:space="preserve">    [E2]   L14   'count_missing_words' was not declared in this scope</text>
+  <text x="20" y="208" fill="#dcdcaa" xml:space="preserve">  → context: fn main() [L11–L16]</text>
+  <text x="20" y="228" fill="#f48771" xml:space="preserve">✗ Not fixed after 1 iterations</text>
+  <text x="20" y="248" fill="#f48771" xml:space="preserve">  remaining errors:</text>
+  <text x="20" y="268" fill="#f48771" xml:space="preserve">    [E1]   L13   invalid initialization of reference of type 'const std::string&amp;' {aka 'const std::__cxx11::basic_string&lt;char&gt;&amp;'} from expression of type 'int'</text>
+  <text x="20" y="288" fill="#f48771" xml:space="preserve">    [E2]   L14   'count_missing_words' was not declared in this scope</text>
+  </g>
+</svg>

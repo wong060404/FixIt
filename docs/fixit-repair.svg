@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="826" height="632" viewBox="0 0 826 632" role="img" aria-label="PowerShell — fixit e1_missing_include.cpp --agent --llm mock --verbose">
+  <title>PowerShell — fixit e1_missing_include.cpp --agent --llm mock --verbose</title>
+  <rect x="0.5" y="0.5" width="825" height="631" rx="10" fill="#1e1e1e" stroke="#3c3c3c"/>
+  <path d="M0.5 10.5 A10 10 0 0 1 10.5 0.5 H815.5 A10 10 0 0 1 825.5 10.5 V36 H0.5 Z" fill="#323233"/>
+  <circle cx="18" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="36" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="54" cy="18" r="6" fill="#27c93f"/>
+  <text x="413" y="22" text-anchor="middle" font-family="Cascadia Mono,Consolas,'Courier New',monospace" font-size="12" fill="#bbbbbb">PowerShell — fixit e1_missing_include.cpp --agent --llm mock --verbose</text>
+  <g font-family="Cascadia Mono,Consolas,'Courier New',monospace" font-size="14">
+  <text x="20" y="68" fill="#4ec9b0" xml:space="preserve">══ FixIt v0.1.0 · agent mode (mock) ══</text>
+  <text x="20" y="88" fill="#d4d4d4" xml:space="preserve"> </text>
+  <text x="20" y="108" fill="#569cd6" xml:space="preserve">── iteration 1 ----------------------------</text>
+  <text x="20" y="128" fill="#dcdcaa" xml:space="preserve">$ g++ -fsyntax-only e1_missing_include.cpp</text>
+  <text x="20" y="148" fill="#f48771" xml:space="preserve">  ✗ 10 errors</text>
+  <text x="20" y="168" fill="#f48771" xml:space="preserve">    [E1]   L11   expected ',' or ';' before 'return'</text>
+  <text x="20" y="188" fill="#f48771" xml:space="preserve">    [E2]   L14   'vector' is not a member of 'std'</text>
+  <text x="20" y="208" fill="#f48771" xml:space="preserve">    [E3]   L14   expected primary-expression before '&gt;' token</text>
+  <text x="20" y="228" fill="#f48771" xml:space="preserve">    [E4]   L14   'words' was not declared in this scope</text>
+  <text x="20" y="248" fill="#f48771" xml:space="preserve">    [E5]   L14   expected primary-expression before 'const'</text>
+  <text x="20" y="268" fill="#f48771" xml:space="preserve">    [E6]   L14   expression list treated as compound expression in initializer [-fpermissive]</text>
+  <text x="20" y="288" fill="#f48771" xml:space="preserve">    [E7]   L20   'vector' is not a member of 'std'</text>
+  <text x="20" y="308" fill="#f48771" xml:space="preserve">    [E8]   L20   expected primary-expression before '&gt;' token</text>
+  <text x="20" y="328" fill="#f48771" xml:space="preserve">    [E9]   L20   'words' was not declared in this scope</text>
+  <text x="20" y="348" fill="#f48771" xml:space="preserve">    [E10]  L21   'add_word' cannot be used as a function</text>
+  <text x="20" y="368" fill="#dcdcaa" xml:space="preserve">  → context: fn parse_count() [L9–L12]</text>
+  <text x="20" y="388" fill="#dcdcaa" xml:space="preserve">  → patch…</text>
+  <text x="20" y="408" fill="#89d185" xml:space="preserve">    ✓ hunk 1 @ L8    (exact)</text>
+  <text x="20" y="428" fill="#569cd6" xml:space="preserve">── iteration 2 ----------------------------</text>
+  <text x="20" y="448" fill="#dcdcaa" xml:space="preserve">$ g++ -fsyntax-only e1_missing_include.cpp</text>
+  <text x="20" y="468" fill="#f48771" xml:space="preserve">  ✗ 1 error</text>
+  <text x="20" y="488" fill="#f48771" xml:space="preserve">    [E1]   L12   expected ',' or ';' before 'return'</text>
+  <text x="20" y="508" fill="#dcdcaa" xml:space="preserve">  → context: fn parse_count() [L10–L13]</text>
+  <text x="20" y="528" fill="#dcdcaa" xml:space="preserve">  → patch…</text>
+  <text x="20" y="548" fill="#89d185" xml:space="preserve">    ✓ hunk 1 @ L11   (fuzzy, drift-1)</text>
+  <text x="20" y="568" fill="#dcdcaa" xml:space="preserve">$ g++ -fsyntax-only e1_missing_include.cpp</text>
+  <text x="20" y="588" fill="#89d185" xml:space="preserve">  ✓ clean</text>
+  <text x="20" y="608" fill="#89d185" xml:space="preserve">✔ Fixed 10 errors in 2 iterations</text>
+  </g>
+</svg>

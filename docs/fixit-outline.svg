@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="312" viewBox="0 0 520 312" role="img" aria-label="PowerShell — fixit e1_missing_include.cpp --outline">
+  <title>PowerShell — fixit e1_missing_include.cpp --outline</title>
+  <rect x="0.5" y="0.5" width="519" height="311" rx="10" fill="#1e1e1e" stroke="#3c3c3c"/>
+  <path d="M0.5 10.5 A10 10 0 0 1 10.5 0.5 H509.5 A10 10 0 0 1 519.5 10.5 V36 H0.5 Z" fill="#323233"/>
+  <circle cx="18" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="36" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="54" cy="18" r="6" fill="#27c93f"/>
+  <text x="260" y="22" text-anchor="middle" font-family="Cascadia Mono,Consolas,'Courier New',monospace" font-size="12" fill="#bbbbbb">PowerShell — fixit e1_missing_include.cpp --outline</text>
+  <g font-family="Cascadia Mono,Consolas,'Courier New',monospace" font-size="14">
+  <text x="20" y="68" fill="#4ec9b0" xml:space="preserve">══ FixIt v0.1.0 · outline mode ══</text>
+  <text x="20" y="88" fill="#d4d4d4" xml:space="preserve"> </text>
+  <text x="20" y="108" fill="#d4d4d4" xml:space="preserve">e1_missing_include.cpp: 23 lines, 3 functions</text>
+  <text x="20" y="128" fill="#f48771" xml:space="preserve">  ✗ the AST contains syntax errors on line 10</text>
+  <text x="20" y="148" fill="#d4d4d4" xml:space="preserve"> </text>
+  <text x="20" y="168" fill="#d4d4d4" xml:space="preserve">  includes</text>
+  <text x="20" y="188" fill="#d4d4d4" xml:space="preserve">    &lt;string&gt;</text>
+  <text x="20" y="208" fill="#d4d4d4" xml:space="preserve"> </text>
+  <text x="20" y="228" fill="#d4d4d4" xml:space="preserve">  functions</text>
+  <text x="20" y="248" fill="#d4d4d4" xml:space="preserve">    L9    - L12    parse_count</text>
+  <text x="20" y="268" fill="#d4d4d4" xml:space="preserve">    L14   - L17    add_word</text>
+  <text x="20" y="288" fill="#d4d4d4" xml:space="preserve">    L19   - L23    main</text>
+  </g>
+</svg>
