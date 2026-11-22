@@ -18,24 +18,28 @@ jobs:
           # The spec requires gcc 12 and clang 15; both are preinstalled on the
           # runner images, and the requested version is selected explicitly so a
           # future image bump cannot silently change the compiler under test.
-          - name: ubuntu-latest / gcc-12
+          - name: ubuntu-latest / gcc-12 (TLS on)
             os: ubuntu-latest
             cxx: g++-12
             cc: gcc-12
+            openssl: "ON"
           - name: macos-latest / clang
             os: macos-latest
             cxx: clang++
             cc: clang
+            openssl: "OFF"
     steps:
       - name: Check out (with submodules, if any)
         uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install gcc-12 (ubuntu)
+      - name: Install gcc-12 and the TLS headers (ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-12 g++-12
+          # libssl-dev is what the TLS-enabled leg links against, so the
+          # #ifdef CPPHTTPLIB_OPENSSL_SUPPORT blocks are compiled on every push.
+          sudo apt-get install -y gcc-12 g++-12 libssl-dev
           g++-12 --version
       - name: Report compiler versions
         run: |
@@ -47,11 +51,21 @@ jobs:
           -DCMAKE_C_COMPILER=${{ matrix.cc }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
           -DFIXIT_TEST_COMPILER=${{ matrix.cxx }}
+          -DFIXIT_ENABLE_OPENSSL=${{ matrix.openssl }}
       - name: Build
         run: cmake --build build -j 4
       - name: Test
         run: ctest --test-dir build --output-on-failure
       # The demos are part of the acceptance criteria: e1 and e2 must be fixed
+      # The Catch2 suite never opens a socket (MockLlm answers in-process), so the
+      # HTTP client, the OpenAI JSON shapes and the tool-call round trip are only
+      # covered here: a scripted server drives the real binary over real sockets.
+      - name: AI mode smoke test (offline stub model)
+        shell: bash
+        run: |
+          set -eux
+          FIXIT_BIN="$GITHUB_WORKSPACE/build/bin/fixit" PYTHON=python3 \
+            bash tools/ai_mode_smoke.sh
       # by the mock (exit 0) and e3 must be left alone (exit 1).  --no-write
       # repairs a scratch copy so the checkout stays clean.
       - name: Demo smoke test
@@ -75,8 +89,19 @@ jobs:
   # executables independent of the MinGW runtime DLLs, which matters for the
   # ctest PATH handling.
   windows:
-    name: windows-latest / msys2-ucrt64
+    name: windows-latest / msys2-ucrt64 (${{ matrix.openssl }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two legs, because TLS is a different code path on Windows: with OpenSSL,
+        # cpp-httplib verifies the chain against the Windows certificate store
+        # through WinCrypt, which needs crypt32 linked.  A plain build never
+        # compiles any of that, so only this leg would catch a regression such as
+        # `undefined reference to __imp_CertGetCertificateChain`.
+        include:
+          - openssl: "OFF"
+          - openssl: "ON"
     defaults:
       run:
         shell: msys2 {0}
@@ -94,6 +119,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            ${{ matrix.openssl == 'ON' && 'mingw-w64-ucrt-x86_64-openssl' || '' }}
       - name: Report compiler versions
         run: |
           gcc --version
@@ -105,6 +131,7 @@ jobs:
           -DCMAKE_C_COMPILER=gcc
           -DCMAKE_CXX_COMPILER=g++
           -DFIXIT_TEST_COMPILER=g++
+          -DFIXIT_ENABLE_OPENSSL=${{ matrix.openssl }}
           -DCMAKE_EXE_LINKER_FLAGS=-static
       - name: Build
         run: cmake --build build --parallel

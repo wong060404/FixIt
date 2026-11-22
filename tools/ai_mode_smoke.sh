@@ -128,7 +128,11 @@ check() {
 
 echo "FixIt AI mode -- offline acceptance (stub on 127.0.0.1:${PORT}, drift ${DRIFT})"
 echo
-check e1_missing_include.cpp 0 "Fixed 5 errors"
+# "Fixed N errors" is compiler-dependent: GCC counts 10 diagnostics for e1 where
+# Clang counts 5, so asserting the number made this pass on macOS and fail on
+# ubuntu.  The exit code already proves the repair (the compiler said clean); the
+# text check only has to confirm the success line was printed.
+check e1_missing_include.cpp 0 "Fixed"
 check e2_drift.cpp 0 "fuzzy"
 check e3_type_error.cpp 1 "Not fixed"
 echo

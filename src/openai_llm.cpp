@@ -4,12 +4,14 @@
 // the duration of the call and is never echoed into any output, trace or log:
 // see docs/decisions.md ADR-005.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <cctype>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <httplib.h>
@@ -94,6 +96,39 @@ nlohmann::json messages_to_json(const std::vector<Message>& messages) {
   return array;
 }
 
+/// Delay before the first retry.  FIXIT_LLM_RETRY_BASE_MS=0 keeps the tests fast.
+int retry_base_delay_ms() {
+  const char* env = std::getenv("FIXIT_LLM_RETRY_BASE_MS");
+  if (env != nullptr) {
+    try {
+      const int value = std::stoi(env);
+      if (value >= 0 && value <= 60000) return value;
+    } catch (const std::exception&) {
+      // fall through to the default
+    }
+  }
+  return 250;
+}
+
+/// A dropped connection or a 5xx deserves another try; a certificate problem does
+/// not -- a broken trust store never fixes itself between two attempts.
+bool retryable_error(httplib::Error error) {
+  switch (error) {
+    case httplib::Error::Success:
+    case httplib::Error::SSLServerVerification:
+    case httplib::Error::SSLServerHostnameVerification:
+    case httplib::Error::SSLLoadingCerts:
+    case httplib::Error::Canceled:
+    case httplib::Error::ExceedRedirectCount:
+    case httplib::Error::BindIPAddress:
+      return false;
+    default:
+      return true;
+  }
+}
+
+bool retryable_status(int status) { return status == 429 || (status >= 500 && status < 600); }
+
 }  // namespace
 
 bool openai_tls_available() {
@@ -153,6 +188,24 @@ LlmResponse OpenAiLlm::chat(const std::vector<Message>& messages,
     return true;
   };
 
+  // One hiccup used to end the whole repair round, with a message identical to a
+  // permanently broken endpoint.  Retry 429/5xx and retryable transport errors with
+  // a short backoff; never retry 4xx (configuration) or certificate failures.
+  constexpr int kMaxAttempts = 3;
+  const auto post_with_retry = [&](auto& client) -> httplib::Result {
+    int delay = retry_base_delay_ms();
+    for (int attempt_index = 1;; ++attempt_index) {
+      httplib::Result attempt = client.Post(endpoint.path, headers, body.dump(), "application/json");
+      const bool again =
+          attempt ? retryable_status(attempt->status) : retryable_error(attempt.error());
+      if (!again || attempt_index >= kMaxAttempts) return attempt;
+      std::cerr << "fixit: retrying the LLM request (" << attempt_index + 1 << "/" << kMaxAttempts
+                << ") in " << delay << " ms\n";
+      if (delay > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+      delay = delay > 0 ? delay * 2 : 0;
+    }
+  };
+
   httplib::Result result;
   if (endpoint.base.rfind("https://", 0) == 0) {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -193,7 +246,7 @@ LlmResponse OpenAiLlm::chat(const std::vector<Message>& messages,
     }
     if (!ca_bundle.empty()) client.set_ca_cert_path(ca_bundle.c_str());
     client.enable_server_certificate_verification(true);
-    result = client.Post(endpoint.path, headers, body.dump(), "application/json");
+    result = post_with_retry(client);
     if (!handle(result)) {
       response.is_final = true;
       return response;
@@ -212,7 +265,7 @@ LlmResponse OpenAiLlm::chat(const std::vector<Message>& messages,
     client.set_follow_location(true);
     client.set_connection_timeout(30);
     client.set_read_timeout(120);
-    result = client.Post(endpoint.path, headers, body.dump(), "application/json");
+    result = post_with_retry(client);
     if (!handle(result)) {
       response.is_final = true;
       return response;
