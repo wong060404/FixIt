@@ -131,8 +131,21 @@ else()
     target_compile_definitions(fixit_httplib INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT=0)
   endif()
   if(WIN32)
+    # cpp-httplib uses Windows 10 APIs (CreateFile2), which MinGW hides unless
+    # _WIN32_WINNT says so.  tools/windows/build_fixit.ps1 passed these two defines
+    # by hand, so the CMake path silently diverged and failed with
+    #   #error "cpp-httplib doesn't support Windows 8 or lower"
+    # The MSYS2 headers default high enough, which is why CI never saw it.
+    target_compile_definitions(fixit_httplib INTERFACE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
     # Plain-HTTP cpp-httplib compiles against Winsock on Windows.
     target_link_libraries(fixit_httplib INTERFACE ws2_32)
+    if(FIXIT_ENABLE_OPENSSL)
+      # With OpenSSL, cpp-httplib verifies the peer chain against the Windows
+      # certificate store through WinCrypt.  Those symbols live in crypt32, and
+      # without it a TLS-enabled MinGW build fails to link with a wall of
+      # `undefined reference to __imp_Cert*` -- while a plain build never notices.
+      target_link_libraries(fixit_httplib INTERFACE crypt32)
+    endif()
   endif()
   target_link_libraries(fixit_third_party INTERFACE fixit_httplib)
 endif()
