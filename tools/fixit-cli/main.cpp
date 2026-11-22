@@ -331,18 +331,47 @@ void write_metrics(const std::string& path, const Metrics& metrics, bool success
   out << os.str();
 }
 
-void print_error_list(const std::vector<fixit::Diagnostic>& diagnostics, const std::string& indent) {
+void print_error_list(const std::vector<fixit::Diagnostic>& diagnostics, const std::string& indent,
+                      const std::string& target_basename) {
   std::size_t index = 0;
   for (const fixit::Diagnostic& d : diagnostics) {
     if (d.level != fixit::DiagLevel::Error) continue;
     std::ostringstream label;
     label << "[E" << ++index << "]";
+    // A diagnostic can point into an included header.  Printing only the line
+    // number attributes it to the file named on the command line -- and the code
+    // map then looks for its enclosing function in the wrong file.
+    if (!d.file.empty() && basename_of(d.file) != target_basename) {
+      std::printf("%s%-6s %s:%d %s\n", indent.c_str(), label.str().c_str(),
+                  basename_of(d.file).c_str(), d.line, d.message.c_str());
+      continue;
+    }
     std::printf("%s%-6s L%-4d %s\n", indent.c_str(), label.str().c_str(), d.line, d.message.c_str());
   }
 }
 
-void print_errors(const fixit::CompileResult& result, const std::string& indent) {
-  print_error_list(result.diagnostics, indent);
+void print_errors(const fixit::CompileResult& result, const std::string& indent,
+                  const std::string& target_basename) {
+  print_error_list(result.diagnostics, indent, target_basename);
+}
+
+/// Warnings were parsed and then dropped: `--flag -Wall` still printed "clean",
+/// hiding the one thing the user asked the compiler for.
+std::size_t warning_count_of(const fixit::CompileResult& result) {
+  std::size_t count = 0;
+  for (const fixit::Diagnostic& d : result.diagnostics) {
+    if (d.level == fixit::DiagLevel::Warning) ++count;
+  }
+  return count;
+}
+
+void print_warnings(const fixit::CompileResult& result, const std::string& indent) {
+  std::size_t index = 0;
+  for (const fixit::Diagnostic& d : result.diagnostics) {
+    if (d.level != fixit::DiagLevel::Warning) continue;
+    ++index;
+    std::printf("%s[W%zu]  L%-4d %s\n", indent.c_str(), index, d.line, d.message.c_str());
+  }
 }
 
 /// A compile that failed without producing a single parsed diagnostic is the most
@@ -696,7 +725,9 @@ int main(int argc, char** argv) {
       for (const fixit::FunctionInfo& fn : map.functions()) {
         std::printf("    L%-4d - L%-4d  %s\n", fn.start_line, fn.end_line, fn.name.c_str());
       }
-      return 0;
+      // A script asking for the outline must be able to tell a broken file from a
+      // healthy one without parsing the text it just printed.
+      return map.has_syntax_errors() ? 1 : 0;
     }
 
     // ---- compile-only mode ---------------------------------------------------
@@ -706,8 +737,20 @@ int main(int argc, char** argv) {
       std::cout << "$ " << options.compiler << " -std=c++20 -fsyntax-only";
       for (const std::string& flag : options.extra_flags) std::cout << " " << flag;
       std::cout << " " << display_file << "\n";
+      if (result.exit_code == 127) {
+        // Documented as exit code 127: the compiler could not be started at all,
+        // which is an environment problem, not a verdict about the file.
+        print_compile_failure(result, "    ");
+        return 127;
+      }
       if (result.clean()) {
-        std::cout << "  " << green("✓ clean") << "\n";
+        const std::size_t warnings = warning_count_of(result);
+        std::cout << "  " << green("✓ clean");
+        if (warnings > 0) {
+          std::cout << " (" << warnings << (warnings == 1 ? " warning" : " warnings") << ")";
+        }
+        std::cout << "\n";
+        if (warnings > 0) print_warnings(result, "    ");
         return 0;
       }
       if (result.error_count() == 0) {
@@ -716,7 +759,7 @@ int main(int argc, char** argv) {
         std::cout << "  " << red("✗ " + std::to_string(result.error_count()) +
                                  (result.error_count() == 1 ? " error" : " errors"))
                   << "\n";
-        print_errors(result, "    ");
+        print_errors(result, "    ", display_file);
       }
       return 1;
     }
@@ -742,6 +785,9 @@ int main(int argc, char** argv) {
     fixit::Agent agent(std::move(tools), std::move(llm), compiler, workdir);
     agent.set_trace_path(options.trace);
 
+    // Set when the compiler could not be started at all (exit code 127).
+    bool compiler_unavailable = false;
+
     Metrics metrics;
     // One compile per iteration is printed.  The engine re-compiles to verify a
     // patch, which can report the identical state; that duplicate is folded into
@@ -757,6 +803,9 @@ int main(int argc, char** argv) {
       return os.str();
     };
     agent.set_observer([&](const fixit::Agent::Event& event) {
+      if (event.kind == fixit::Agent::Event::Kind::Compile && event.compile.exit_code == 127) {
+        compiler_unavailable = true;
+      }
       if (!options.verbose) return;  // metrics are collected after the run
 
       if (event.kind == fixit::Agent::Event::Kind::Compile) {
@@ -779,7 +828,7 @@ int main(int argc, char** argv) {
               std::cout << "  " << red("✗ " + std::to_string(errors) +
                                        (errors == 1 ? " error" : " errors"))
                         << "\n";
-              print_errors(event.compile, "    ");
+              print_errors(event.compile, "    ", display_file);
             }
           }
           return;
@@ -805,12 +854,23 @@ int main(int argc, char** argv) {
         } else {
           std::cout << "  " << red("✗ " + std::to_string(errors) + (errors == 1 ? " error" : " errors"))
                     << "\n";
-          print_errors(event.compile, "    ");
+          print_errors(event.compile, "    ", display_file);
         }
 
         if (!event.compile.diagnostics.empty()) {
+          const fixit::Diagnostic& first = event.compile.diagnostics.front();
+          if (!first.file.empty() && basename_of(first.file) != display_file) {
+            // The error is in an included header: its line number means nothing in
+            // the file being repaired, so report the location instead of mapping it
+            // onto an unrelated function of the wrong file.
+            std::cout << "  " << yellow("→ context: " + basename_of(first.file) + ":" +
+                                        std::to_string(first.line) +
+                                        " (included header, not the file under repair)")
+                      << "\n";
+            return;
+          }
           fixit::CodeMap map(target_file);
-          if (const auto fn = map.enclosing_function(event.compile.diagnostics.front().line, 1)) {
+          if (const auto fn = map.enclosing_function(first.line, 1)) {
             std::cout << "  " << yellow("→ context: fn " + fn->name + "() [L" +
                                         std::to_string(fn->start_line) + "–L" +
                                         std::to_string(fn->end_line) + "]")
@@ -844,6 +904,12 @@ int main(int argc, char** argv) {
 
     const fixit::AgentResult result = agent.run(display_file, options.iterations);
 
+    if (compiler_unavailable) {
+      std::cerr << "fixit: cannot execute the compiler '" << options.compiler
+                << "' (exit code 127); check --compiler or PATH\n";
+      return 127;
+    }
+
     // Single source of truth for the counters: the patches the loop recorded.
     for (const auto& [round, patch] : result.patches) {
       (void)round;
@@ -867,7 +933,7 @@ int main(int argc, char** argv) {
                      suffix) << "\n";
     if (!result.final_errors.empty()) {
       std::cout << "  remaining errors:\n";
-      print_error_list(result.final_errors, "    ");
+      print_error_list(result.final_errors, "    ", display_file);
     }
     return 1;
 
