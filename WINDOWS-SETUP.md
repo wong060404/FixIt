@@ -21,12 +21,15 @@
 When you are done, your machine has:
 
 ```
-C:\FixIt\                          <- work folder (plain ASCII path: important!)
+C:\FixIt\                          <- work folder (keep the toolchain pure ASCII)
 ├── FixIt\                         <- the project you cloned
 │   ├── build-win\bin\fixit.exe    <- the tool itself
 │   └── tools\windows\             <- helper scripts used by this guide
 └── toolchain\                     <- the compiler (unpacked, nothing installed)
 ```
+
+> **`C:\FixIt` is only an example.** If you cloned somewhere else (the fast path allows
+> any folder), substitute your own path in every command below.
 
 ---
 
@@ -38,7 +41,9 @@ Use `C:\FixIt`. gcc hands its own library directory (an absolute path) to the li
 which decodes it in the local code page, so a **toolchain** under a Chinese path fails
 with a pile of confusing `No such file or directory` errors. Paths with spaces are
 fine, and since the UTF-8 work landed, a checkout and a source file whose names contain
-Chinese characters also build and repair correctly (verified with an MSYS2 GCC).
+Chinese characters also build and repair correctly (verified with an MSYS2 GCC). The one
+exception is `fetch_mingw.py`: it installs the toolchain next to the checkout, so a
+checkout that fetches its own toolchain must itself sit on an ASCII path.
 
 **Rule 2: do not put it in OneDrive, on the Desktop, or under Documents.**
 The compiler plus build output is roughly 2 GB, which OneDrive will try to sync; and its
@@ -65,10 +70,11 @@ Set-Location FixIt
 fixit.cmd examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write
 ```
 
-`setup.cmd` finds (or offers to download) a compiler, builds into `build-win\` (about a
-minute the first time), and registers `fixit.cmd` so it works from **any** folder
-afterwards. Re-running it is harmless: an up-to-date build is reused. If you prefer not
-to register anything, run `fixit.cmd` from inside the checkout instead — nothing else
+`setup.cmd` finds a compiler (or tells you to re-run it with `-FetchToolchain`), builds
+into `build-win\` (about a minute the first time), and registers `fixit.cmd` so it works
+from **any** folder afterwards. Re-running it is harmless: an up-to-date build is
+reused. If you prefer not to register anything, run `fixit.cmd` from inside the checkout
+instead — nothing else
 needs to be set up: no `PATH` edit by hand, no environment variable, no `chcp`, no
 CMake, and the checkout may live in any folder on any drive.
 
@@ -165,19 +171,19 @@ asset      : winlibs-x86_64-posix-seh-gcc-...zip (... MB)
 downloaded -> C:\FixIt\FixIt\tools\windows\.cache\winlibs-...zip
 extracting (about 1.5 GB, this takes a minute) ...
 extracted  -> C:\FixIt\toolchain
-compiler   : C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe
+compiler   : C:\FixIt\toolchain\mingw64\bin\g++.exe
 ```
 
 Check it:
 
 ```powershell
-& C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe --version
+& C:\FixIt\toolchain\mingw64\bin\g++.exe --version
 ```
 
 **You should see** a first line like:
 
 ```
-g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r2) 16.2.0
+g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r3) 16.2.0
 ```
 
 > You can delete the zip under `C:\FixIt\FixIt\tools\windows\.cache\` afterwards to save
@@ -214,7 +220,7 @@ Test-Path C:\FixIt\FixIt\build-win\bin\fixit.exe
 
 ```powershell
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 Set-Location C:\FixIt\FixIt
 .\build-win\bin\fixit.exe examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write --no-timing
@@ -261,19 +267,21 @@ folder, and `~/Downloads/lab3.cpp` works too. When fixit has to guess it says wh
 picked (`fixit: using '…'`), and when a name matches several files it refuses and lists
 them.
 
-In every new PowerShell window, run these three lines first (or make them permanent, see
-Appendix B):
+If you took the fast path you can skip this block: `fixit.cmd` already finds the
+compiler, switches the console to UTF-8 and puts the compiler on `PATH` for the run.
+The three lines below are for calling `fixit.exe` directly — in every new PowerShell
+window, run them first (or make them permanent, see Appendix B):
 
 ```powershell
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 ```
 
 | What those lines do | Why |
 |---|---|
 | `chcp 65001` | switches the console to UTF-8; without it FixIt's box-drawing characters show as mojibake like `鈺愨晲` (cosmetic only) |
-| `PATH` | lets fixit find `g++`. Alternatively pass `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` every time |
+| `PATH` | lets fixit find `g++`. Alternatively pass `--compiler "C:\FixIt\toolchain\mingw64\bin\g++.exe"` every time |
 | `NO_COLOR` | turns off colour so output is easier to copy |
 
 > **Running it from another folder.** Install the command once with
@@ -375,7 +383,7 @@ Window B (let FixIt repair your file):
 
 ```powershell
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\your-project\your-file.cpp" `
@@ -404,17 +412,19 @@ is normal.
 #### C-3. One command for the whole loop (optional)
 
 To see the per-round log, the metrics and a before/after diff, use this script — it
-starts the relay itself, runs fixit, and stops the relay afterwards:
+starts the relay itself, runs fixit, and stops the relay afterwards. It repairs the
+file **in place**, so pass `-NoWrite` while you are only looking:
 
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File C:\FixIt\FixIt\tools\windows\run-real-loop.ps1 `
-  -BaseUrl "https://your-endpoint/v1" -Model "your-model-name" -File "C:\your-project\your-file.cpp"
+  -BaseUrl "https://your-endpoint/v1" -Model "your-model-name" `
+  -File "C:\your-project\your-file.cpp" -NoWrite
 ```
 
-Without `-File` it creates a small file with one deliberate bug in
-`%TEMP%\fixit-demo\demo_bug.cpp` and repairs that, so you can try the whole thing with
-nothing prepared.
+Drop `-NoWrite` when you want the edit applied. Without `-File` it creates a small file
+with one deliberate bug in `%TEMP%\fixit-demo\demo_bug.cpp` and repairs that one
+instead, so you can try the whole thing with nothing prepared.
 
 ### Flags worth knowing
 
@@ -432,8 +442,9 @@ nothing prepared.
 | `--outline` | print the structure only, no compile |
 | `-h` / `--help` | usage |
 
-Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` internal error,
-`127` compiler not found (PATH or `--compiler` wrong).
+Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` internal error.
+A compiler that is missing or cannot be started is reported as
+`the compiler could not be executed` and exits `1`.
 
 ---
 
@@ -444,9 +455,9 @@ Exit codes: `0` clean or repaired, `1` not repaired, `2` usage error, `3` intern
 | `'git' is not recognized` | Git not installed | Step 1 |
 | `'python' is not recognized` | Python missing, or PATH not ticked during install | Step 1, then reopen the window |
 | `fetch_mingw.py` says the destination contains non-ASCII | the work path has Chinese characters | use `C:\FixIt` and clone again |
-| `No such file or directory`, `cannot find -lstdc++` while building | the toolchain sits under a non-ASCII path | move the whole `C:\FixIt` to a plain ASCII path |
-| `compiler not found. Looked in: ...` | the compiler has not been downloaded | do Step 3 |
-| `the compiler could not be executed (exit code 127)` | `g++` is not on PATH | run the three lines at the top of Part 2, or use `.\fixit.cmd`, which puts the compiler on PATH for you |
+| `No such file or directory`, `cannot find -lstdc++` while building | the toolchain sits under a non-ASCII path | move the **toolchain** folder (not the whole checkout) to a plain ASCII path |
+| `compiler not found. Looked for gcc.exe, g++.exe and ar.exe in: ...` | the compiler has not been downloaded | do Step 3 |
+| `the compiler could not be executed` | `g++` is not on PATH | run the three lines at the top of Part 2, or use `.\fixit.cmd`, which puts the compiler on PATH for you |
 | `the compiler exited 1 without reporting a diagnostic for this file` | the compiler started but could not run its own tools (`as.exe`); MSYS2's gcc finds them through PATH, so an absolute `--compiler` path is not enough | put the compiler's `bin` folder on PATH, or use `.\fixit.cmd` |
 | `fixit: cannot create the --no-write scratch copy ... Permission denied` | every writable home failed (`TEMP`, `%LOCALAPPDATA%\fixit`, the program's folder, the source folder, the current folder) — usually Windows' Controlled Folder Access or an antivirus blocking this unsigned program | the first writable one is now used automatically; if all are blocked, run without `--no-write`, or allow `fixit.exe` under Windows Security → Virus & threat protection → Ransomware protection → Controlled folder access |
 | `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` points straight at `https://` | use the relay from C-2, or the local model from C-1 |
@@ -469,11 +480,13 @@ both to build itself and to be the compiler it drives. The winlibs MinGW-w64 GCC
 installation and no administrator rights, and its diagnostic format is one the project
 explicitly supports.
 
-**Why must the path be ASCII?**
+**Why must the *toolchain* path be ASCII?**
 gcc passes the library paths under its own installation directory to the linker `ld`.
 With a non-ASCII path those bytes are re-decoded in the local code page (936/GBK on a
 Chinese Windows), so `crt2.o` and `-lstdc++` are all "not found" — and the error message
 never points at the real cause. `C:\FixIt\toolchain` avoids the whole class of problem.
+The checkout may live under a non-ASCII path; only the directory gcc itself runs from
+has to be ASCII.
 
 **Why doesn't the Windows build use the project's `cmake`?**
 Two independent problems were hit here. `ninja` blocks forever: it reads each child's
@@ -496,16 +509,19 @@ then applying it, is simply safer.
 
 ## Appendix B — make PATH permanent (optional)
 
-So you do not have to type those three lines in every new window:
+So you do not have to type those three lines in every new window. The launcher and
+`build_fixit.ps1` already find the compiler themselves and no longer need
+`FIXIT_TOOLCHAIN`, so this is only for calling `fixit.exe` directly:
 
 ```powershell
-[Environment]::SetEnvironmentVariable(
-  "Path",
-  "C:\FixIt\toolchain\mingw\mingw64\bin;" + [Environment]::GetEnvironmentVariable("Path","User"),
-  "User")
-[Environment]::SetEnvironmentVariable("FIXIT_TOOLCHAIN", "C:\FixIt\toolchain", "User")
+$bin  = "C:\FixIt\toolchain\mingw64\bin"
+$user = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($user -split ';') -notcontains $bin) {
+  [Environment]::SetEnvironmentVariable("Path", "$bin;$user", "User")
+}
 ```
 
+The `-notcontains` check keeps a second run from adding the same folder twice.
 **Open a new PowerShell window for it to take effect.** (This changes only your own user
 settings, never the system ones.)
 
@@ -521,7 +537,7 @@ powershell -ExecutionPolicy Bypass -File C:\FixIt\FixIt\tools\windows\build_fixi
 
 # --- every new window -------------------------------------------------------
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 
 # --- find what is wrong -----------------------------------------------------

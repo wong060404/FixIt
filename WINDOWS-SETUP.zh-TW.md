@@ -20,12 +20,15 @@
 裝完之後，你電腦上會多出這些東西：
 
 ```
-C:\FixIt\                          ← 工作資料夾（純英文路徑，重要！）
+C:\FixIt\                          ← 工作資料夾（toolchain 要放純 ASCII 路徑）
 ├── FixIt\                         ← 從 GitHub 複製下來的專案
 │   ├── build-win\bin\fixit.exe    ← 編譯出來的工具（主角）
 │   └── tools\windows\             ← 本指南用到的輔助腳本
 └── toolchain\                     ← 編譯器（解壓即用，免安裝）
 ```
+
+> **`C:\FixIt` 只是示例。** 如果你 clone 去第度（快速路徑允許任何資料夾），下面
+> 所有指令請自行換成你的路徑。
 
 ---
 
@@ -36,7 +39,9 @@ C:\FixIt\                          ← 工作資料夾（純英文路徑，重�
 請用 `C:\FixIt`。Windows 上的 GCC 會把自己函式庫的**絕對路徑**交給連結器，而
 連結器用本地編碼解讀；**工具鏈**放在中文路徑下就會變成亂碼，然後出現一堆看不懂的
 `No such file or directory`。路徑含空白沒有問題；在 UTF-8 相關修正之後，checkout
-與原始檔的檔名含中文也能正常建置與修復（已用 MSYS2 的 GCC 實測）。
+與原始檔的檔名含中文也能正常建置與修復（已用 MSYS2 的 GCC 實測）。例外是
+`fetch_mingw.py`：它會把 toolchain 裝在 checkout 旁邊，所以打算用它下載 toolchain 的
+checkout 本身就必須在 ASCII 路徑上。
 
 **規則 2：不要放在 OneDrive、桌面或「文件」資料夾裡。**
 編譯器和建置產物加起來約 2 GB，OneDrive 會把它們同步上雲端，拖慢整台電腦；
@@ -62,9 +67,10 @@ Set-Location FixIt
 fixit.cmd examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write
 ```
 
-`setup.cmd` 會找到（或詢問是否下載）編譯器、建置到 `build-win\`（第一次約一分鐘），
-並把 `fixit.cmd` 註冊成任何資料夾都能用的指令。重複執行沒有副作用：已是最新的建置
-會直接沿用。若不想註冊任何東西，也可以直接在 checkout 內執行 `fixit.cmd`；其餘什麼
+`setup.cmd` 會找到編譯器（找不到時會叫你加 `-FetchToolchain` 再跑一次）、建置到
+`build-win\`（第一次約一分鐘），並把 `fixit.cmd` 註冊成任何資料夾都能用的指令。
+重複執行沒有副作用：已是最新的建置會直接沿用。若不想註冊任何東西，也可以直接在
+checkout 內執行 `fixit.cmd`；其餘什麼
 都不必設定 —— 不必手動改 `PATH`、不必設環境變數、不必 `chcp`、也不必 CMake，而且
 checkout 可以放在任何磁碟的任何資料夾。
 
@@ -159,19 +165,19 @@ asset      : winlibs-x86_64-posix-seh-gcc-...zip (... MB)
 downloaded -> C:\FixIt\FixIt\tools\windows\.cache\winlibs-...zip
 extracting (about 1.5 GB, this takes a minute) ...
 extracted  -> C:\FixIt\toolchain
-compiler   : C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe
+compiler   : C:\FixIt\toolchain\mingw64\bin\g++.exe
 ```
 
 驗證：
 
 ```powershell
-& C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe --version
+& C:\FixIt\toolchain\mingw64\bin\g++.exe --version
 ```
 
 **應該看到**第一行類似：
 
 ```
-g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r2) 16.2.0
+g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r3) 16.2.0
 ```
 
 > 下載完可以把 `C:\FixIt\FixIt\tools\windows\.cache\` 裡的 zip 刪掉，省 274 MB。
@@ -207,7 +213,7 @@ Test-Path C:\FixIt\FixIt\build-win\bin\fixit.exe
 
 ```powershell
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 Set-Location C:\FixIt\FixIt
 .\build-win\bin\fixit.exe examples\buggy\e1_missing_include.cpp --agent --llm mock --verbose --no-write --no-timing
@@ -250,18 +256,20 @@ $ g++ -fsyntax-only e1_missing_include.cpp
 必須猜測時，它會先印出選中的檔案（`fixit: using '…'`）；若一個檔名同時符合多個檔案，
 它會拒絕並列出來，不會亂修其中一個。
 
-每個新開的 PowerShell 視窗，先打這三行（或見附錄 B 設成永久）：
+如果你走的是快速路徑，可以跳過這一段：`fixit.cmd` 已自動找到編譯器、切到 UTF-8，
+並在該次執行把編譯器加進 `PATH`。下面三行是給直接呼叫 `fixit.exe` 用的 —— 每個新開的
+PowerShell 視窗，先打這三行（或見附錄 B 設成永久）：
 
 ```powershell
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 ```
 
 | 那三行在幹嘛 | 說明 |
 |---|---|
 | `chcp 65001` | 把主控台切成 UTF-8，否則 FixIt 的框線字元會顯示成 `鈺愨晲` 這種亂碼（只是顯示問題，不影響功能） |
-| 設 `PATH` | 讓 fixit 找到 `g++`。不設也可以，但要每次加 `--compiler "C:\FixIt\toolchain\mingw\mingw64\bin\g++.exe"` |
+| 設 `PATH` | 讓 fixit 找到 `g++`。不設也可以，但要每次加 `--compiler "C:\FixIt\toolchain\mingw64\bin\g++.exe"` |
 | `NO_COLOR` | 關掉顏色，輸出比較好複製 |
 
 > **從其他資料夾執行。** 先安裝一次指令：
@@ -358,7 +366,7 @@ key loaded : yes
 
 ```powershell
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 
 C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp" `
@@ -384,16 +392,18 @@ C:\FixIt\FixIt\build-win\bin\fixit.exe "C:\你的專案\你的檔案.cpp" `
 
 #### C-3. 一鍵跑完整循環（選用）
 
-想看到逐輪紀錄、metrics 與修改前後的 diff，用這支腳本（它會自己起轉發器、跑完再收掉）：
+想看到逐輪紀錄、metrics 與修改前後的 diff，用這支腳本（它會自己起轉發器、跑完再收掉）。
+注意：它預設會**直接改你的檔案**，只想看的話請加 `-NoWrite`：
 
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File C:\FixIt\FixIt\tools\windows\run-real-loop.ps1 `
-  -BaseUrl "https://你的端點/v1" -Model "你的模型名稱" -File "C:\你的專案\你的檔案.cpp"
+  -BaseUrl "https://你的端點/v1" -Model "你的模型名稱" `
+  -File "C:\你的專案\你的檔案.cpp" -NoWrite
 ```
 
-不給 `-File` 的話，它會自己在 `%TEMP%\fixit-demo\demo_bug.cpp` 造一個有一處錯誤的小檔案
-並修給你看，完全不用準備任何東西。
+想真的套用就拿掉 `-NoWrite`。不給 `-File` 的話，它會自己在
+`%TEMP%\fixit-demo\demo_bug.cpp` 造一個有一處錯誤的小檔案並修給你看，完全不用準備任何東西。
 
 ### 常用旗標速查
 
@@ -411,8 +421,8 @@ powershell -ExecutionPolicy Bypass `
 | `--outline` | 只印結構，不編譯 |
 | `-h` / `--help` | 用法 |
 
-離開代碼：`0` 乾淨或已修好、`1` 未修好、`2` 用法錯誤、`3` 內部錯誤、
-`127` 找不到編譯器（PATH 或 `--compiler` 沒設好）。
+離開代碼：`0` 乾淨或已修好、`1` 未修好、`2` 用法錯誤、`3` 內部錯誤。
+編譯器不存在或無法啟動時會顯示 `the compiler could not be executed`，離開代碼是 `1`。
 
 ---
 
@@ -423,9 +433,9 @@ powershell -ExecutionPolicy Bypass `
 | `'git' 不是內部或外部命令` | 沒裝 Git | 步驟 1 |
 | `'python' 不是內部或外部命令` | 沒裝 Python，或安裝時沒勾 Add to PATH | 步驟 1，裝完要重開視窗 |
 | `fetch_mingw.py` 說 destination contains non-ASCII | 工作路徑含中文 | 改用 `C:\FixIt`，重新 clone |
-| 編譯時一堆 `No such file or directory`、`cannot find -lstdc++` | 編譯器被放在中文路徑下 | 把整個 `C:\FixIt` 換成純英文路徑 |
-| `compiler not found. Looked in: ...` | 還沒下載編譯器 | 先做步驟 3 |
-| `the compiler could not be executed (exit code 127)` | `g++` 不在 PATH | 跑第二部分開頭那三行，或改用 `.\fixit.cmd`（它會自動把編譯器加進 PATH） |
+| 編譯時一堆 `No such file or directory`、`cannot find -lstdc++` | 編譯器被放在中文路徑下 | 把**工具鏈資料夾**（不是整個 checkout）搬到純英文路徑 |
+| `compiler not found. Looked for gcc.exe, g++.exe and ar.exe in: ...` | 還沒下載編譯器 | 先做步驟 3 |
+| `the compiler could not be executed` | `g++` 不在 PATH | 跑第二部分開頭那三行，或改用 `.\fixit.cmd`（它會自動把編譯器加進 PATH） |
 | `the compiler exited 1 without reporting a diagnostic for this file` | 編譯器啟動了，卻找不到它自己的工具（`as.exe`）；MSYS2 的 gcc 是透過 PATH 尋找，所以只給 `--compiler` 絕對路徑並不足夠 | 把編譯器的 `bin` 資料夾加進 PATH，或改用 `.\fixit.cmd` |
 | `fixit: cannot create the --no-write scratch copy ... Permission denied` | 所有可寫位置都失敗（`TEMP`、`%LOCALAPPDATA%\fixit`、程式自己所在資料夾、原始檔資料夾、目前資料夾）——通常是 Windows 的「受控資料夾存取」或防毒軟體擋下這個未簽章程式 | 現在會自動改用第一個可寫的位置；若全部被擋，就拿掉 `--no-write`，或在「Windows 安全性 → 病毒與威脅防護 → 勒索軟體防護 → 受控資料夾存取」允許 `fixit.exe` |
 | `this build has no TLS support; rebuild with -DFIXIT_ENABLE_OPENSSL=ON` | `--base-url` 直接指到 `https://` | 用 C-2 的轉發器，或改用 C-1 的本機模型 |
@@ -447,10 +457,11 @@ FixIt 的用途就是驅動一個真正的編譯器並解讀它的輸出，所�
 一是拿來編譯 FixIt 本身，二是拿來當 FixIt 要驅動的那個編譯器。這裡用的是 winlibs 的
 MinGW-w64 GCC——免安裝、免管理員權限、解壓就能用，而且它的診斷格式是專案明確支援的。
 
-**為什麼路徑一定要 ASCII？**
+**為什麼*工具鏈*路徑一定要 ASCII？**
 gcc 會把自己安裝目錄下的函式庫路徑交給連結器 `ld`。路徑含中文時，這串位元組會被用本地
 代碼頁（例如 936/GBK）重新解讀，於是 `crt2.o`、`-lstdc++` 全部找不到，
 錯誤訊息還完全指不到真正的原因。放在 `C:\FixIt\toolchain` 就完全避開。
+checkout 本身可以放在非 ASCII 路徑；只有 gcc 自己執行所在的資料夾必須是 ASCII。
 
 **為什麼 Windows 上的建置腳本不用專案的 `cmake`？**
 在這個環境試過，有兩個獨立問題：`ninja` 會永久卡住（它會讀子行程的輸出管道直到 EOF，
@@ -470,16 +481,18 @@ Linux / macOS 使用者照專案 README 的 `cmake` 流程即可。
 
 ## 附錄 B：把 PATH 設成永久（可選）
 
-不想每個新視窗都打那三行：
+不想每個新視窗都打那三行。啟動器與 `build_fixit.ps1` 本來就會自己找編譯器，也不再需要
+`FIXIT_TOOLCHAIN`，所以這段只是讓你可以直接呼叫 `fixit.exe`：
 
 ```powershell
-[Environment]::SetEnvironmentVariable(
-  "Path",
-  "C:\FixIt\toolchain\mingw\mingw64\bin;" + [Environment]::GetEnvironmentVariable("Path","User"),
-  "User")
-[Environment]::SetEnvironmentVariable("FIXIT_TOOLCHAIN", "C:\FixIt\toolchain", "User")
+$bin  = "C:\FixIt\toolchain\mingw64\bin"
+$user = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($user -split ';') -notcontains $bin) {
+  [Environment]::SetEnvironmentVariable("Path", "$bin;$user", "User")
+}
 ```
 
+`-notcontains` 那個檢查是為了重跑時不會把同一個資料夾加兩次。
 **要開新的 PowerShell 視窗才會生效。**（只改你這個使用者的設定，不動系統設定。）
 
 ## 附錄 C：全部指令速查
@@ -494,7 +507,7 @@ powershell -ExecutionPolicy Bypass -File C:\FixIt\FixIt\tools\windows\build_fixi
 
 # ── 每個新視窗 ──────────────────────────────────
 chcp 65001 > $null
-$env:PATH = "C:\FixIt\toolchain\mingw\mingw64\bin;$env:PATH"
+$env:PATH = "C:\FixIt\toolchain\mingw64\bin;$env:PATH"
 $env:NO_COLOR = "1"
 
 # ── 找錯在哪 ────────────────────────────────────
