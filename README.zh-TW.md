@@ -587,15 +587,16 @@ golden 案例由 [`tools/gen_golden_cases.py`](tools/gen_golden_cases.py) 生成
 ## 8. 可重用性論證
 
 > tree-sitter-cpp 只能解析、cpp-httplib 只能送 HTTP、diffutils 只能機械式套用 diff。
-> **沒有現成 C++ 庫能閉環「compiler diagnostics → code location → LLM patch →
-> fuzzy apply → re-verify」並把失敗原因結構化回傳給 LLM**。FixIt 補上這層，任何
-> agentic coding 工具（CI 修復 bot、IDE 插件）可直接 link。
+> **沒有現成 C++ 庫能從 compiler diagnostics → code location → LLM patch →
+> fuzzy apply → re-verify 閉環，並把結構化的失敗原因回傳給模型**。FixIt 提供這層，
+> 任何 agentic coding 工具（CI 修復 bot、IDE 插件）都可以直接 link。
 
 具體來說，`libfixit` 是一個普通的 CMake target，介面像 header-only
 （`include/fixit/*.h`）、沒有全域狀態、不依賴 CLI：`add_subdirectory` 再 link 即可。
 CI 修復 bot 可以只用 `Compiler` + `PatchEngine`，IDE 外掛可以只用 `CodeMap`，
-agent 產品可以直接拿完整的 `Agent`。安裝函式庫、匯出、附 package config 這幾件事是
-*刻意還沒做*的——列在 roadmap 上。
+agent 產品可以直接拿完整的 `Agent`。函式庫也提供 install 與 package config 匯出，
+使用者可以直接 `find_package(FixIt CONFIG REQUIRED)` 並 link `FixIt::fixit`，
+不必把這個 repo 加為子目錄。
 
 ## 8a. 實測效果
 
@@ -639,7 +640,7 @@ agent 產品可以直接拿完整的 `Agent`。安裝函式庫、匯出、附 pa
 * **多檔專案** — `PatchEngine::parse_diff` 已經會回傳多個 `DiffFile`，`Agent` 也能
   patch 其中任何一個；缺的是產出整個 target 逐檔診斷的建置系統轉接器。讀
   `compile_commands.json` 也能免去手動傳 `-I`。
-* **打包（Packaging）** — `install()`/export rules 與 package config，接著是
+* **發佈（Distribution）** — 在現有的 `install()`/export rules 之上提供
   vcpkg/Conan recipe，讓使用者不需要自己建置 tree-sitter。
 * **Demo 影片** — [已發布到 YouTube](https://youtu.be/w3c9Fsy27VE)
   （[本機副本](docs/fixit_intro_subs.mp4)）。它由同一份錄製記錄生成，因此不會與
@@ -650,8 +651,8 @@ agent 產品可以直接拿完整的 `Agent`。安裝函式庫、匯出、附 pa
 ```
 fixit/
 ├── fixit.ps1, fixit.cmd                # Windows 啟動器：首次使用自動建置，無需設定
-├── include/fixit/{compiler,codemap,patch,agent,types}.h
-├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm}.cpp
+├── include/fixit/{compiler,codemap,patch,agent,platform,types}.h
+├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm,platform}.cpp
 ├── tools/fixit-cli/main.cpp
 ├── tools/windows/{build_fixit.ps1,fixit-env.ps1,fetch_mingw.py,llm-relay.py,
 │                probe-endpoint.py,run-real-loop.ps1}

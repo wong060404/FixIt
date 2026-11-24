@@ -640,17 +640,19 @@ traces.
 
 ## 8. Reusability Justification
 
-> tree-sitter-cpp 只能解析、cpp-httplib 只能送 HTTP、diffutils 只能機械式套用 diff。
-> **沒有現成 C++ 庫能閉環「compiler diagnostics → code location → LLM patch →
-> fuzzy apply → re-verify」並把失敗原因結構化回傳給 LLM**。FixIt 補上這層，任何
-> agentic coding 工具（CI 修復 bot、IDE 插件）可直接 link。
+> tree-sitter-cpp parses, cpp-httplib sends HTTP, diffutils applies diffs mechanically.
+> **No existing C++ library closes the loop from compiler diagnostics to code
+> location to LLM patch to fuzzy apply to re-verify, and returns a structured
+> failure reason to the model.** FixIt provides that layer, so any agentic coding
+> tool (a CI repair bot, an IDE plugin) can link it directly.
 
 Concretely, `libfixit` is an ordinary CMake target with a header-only-style surface
 (`include/fixit/*.h`), no globals and no CLI dependency: `add_subdirectory` and link
 it. A CI repair bot can use just `Compiler` + `PatchEngine`, an IDE plugin can use
-`CodeMap` alone, and an agent product can take the whole `Agent`. Installing the
-library, exporting it and shipping a package config are deliberately *not* done
-yet -- that work is listed in the roadmap.
+`CodeMap` alone, and an agent product can take the whole `Agent`. The library also
+installs and exports a package config, so a consumer can
+`find_package(FixIt CONFIG REQUIRED)` and link `FixIt::fixit` without adding this
+repository as a subdirectory.
 
 ## 8a. Measured effectiveness
 
@@ -701,8 +703,8 @@ nearest candidate, which the sweep counts as a miss. See
   `DiffFile`s and `Agent` can patch any of them; the missing piece is a build
   system adapter that produces per-file diagnostics for a whole target. Reading
   `compile_commands.json` would also remove the need to pass `-I` by hand.
-* **Packaging** — `install()`/export rules and a package config, then vcpkg/Conan
-  recipes, so consumers do not build tree-sitter themselves.
+* **Distribution** — vcpkg/Conan recipes on top of the existing `install()`/export
+  rules, so consumers do not build tree-sitter themselves.
 * **Demo video** — [published on YouTube](https://youtu.be/w3c9Fsy27VE) ([local copy](docs/fixit_intro_subs.mp4)). It is generated from
   the same recorded transcript, so it cannot drift from
   `docs/demo_output.txt`.
@@ -712,8 +714,8 @@ nearest candidate, which the sweep counts as a miss. See
 ```
 fixit/
 ├── fixit.ps1, fixit.cmd                # Windows launcher: builds on first use, no setup
-├── include/fixit/{compiler,codemap,patch,agent,types}.h
-├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm}.cpp
+├── include/fixit/{compiler,codemap,patch,agent,platform,types}.h
+├── src/{compiler,codemap,patch,agent,openai_llm,mock_llm,platform}.cpp
 ├── tools/fixit-cli/main.cpp
 ├── tools/windows/{build_fixit.ps1,fixit-env.ps1,fetch_mingw.py,llm-relay.py,
 │                probe-endpoint.py,run-real-loop.ps1}
