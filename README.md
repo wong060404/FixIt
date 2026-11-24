@@ -38,6 +38,7 @@ Every prose document in this repository exists in English and Traditional Chines
 | Document | English | 繁體中文 |
 |---|---|---|
 | Getting started on Windows: clone → build → run → repair a file | [WINDOWS-SETUP.md](WINDOWS-SETUP.md) | [WINDOWS-SETUP.zh-TW.md](WINDOWS-SETUP.zh-TW.md) |
+| Using FixIt from VS Code: tasks, F5 debugging, and a CMake build on Windows | [VSCODE.md](VSCODE.md) | [VSCODE.zh-TW.md](VSCODE.zh-TW.md) |
 | This README | [README.md](README.md) | [README.zh-TW.md](README.zh-TW.md) |
 | Design decisions (ADRs) | [docs/decisions.md](docs/decisions.md) | [docs/decisions.zh-TW.md](docs/decisions.zh-TW.md) |
 | Wiki outline | [docs/wiki_outline.md](docs/wiki_outline.md) | [docs/wiki_outline.zh-TW.md](docs/wiki_outline.zh-TW.md) |

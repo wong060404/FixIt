@@ -34,6 +34,7 @@ exit code 拒絕了它。下面的一切都源自於閉上這個迴圈。
 | 文件 | English | 繁體中文 |
 |---|---|---|
 | Windows 入門：clone → build → 執行 → 修復一個檔案 | [WINDOWS-SETUP.md](WINDOWS-SETUP.md) | [WINDOWS-SETUP.zh-TW.md](WINDOWS-SETUP.zh-TW.md) |
+| 在 VS Code 中使用 FixIt：tasks、F5 除錯、Windows 上的 CMake 建置 | [VSCODE.md](VSCODE.md) | [VSCODE.zh-TW.md](VSCODE.zh-TW.md) |
 | 本 README | [README.md](README.md) | [README.zh-TW.md](README.zh-TW.md) |
 | 設計決策（ADR） | [docs/decisions.md](docs/decisions.md) | [docs/decisions.zh-TW.md](docs/decisions.zh-TW.md) |
 | Wiki 大綱 | [docs/wiki_outline.md](docs/wiki_outline.md) | [docs/wiki_outline.zh-TW.md](docs/wiki_outline.zh-TW.md) |
