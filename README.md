@@ -639,10 +639,11 @@ traces.
 
 ## 8. Reusability Justification
 
-> tree-sitter-cpp 只能解析、cpp-httplib 只能送 HTTP、diffutils 只能機械式套用 diff。
-> **沒有現成 C++ 庫能閉環「compiler diagnostics → code location → LLM patch →
-> fuzzy apply → re-verify」並把失敗原因結構化回傳給 LLM**。FixIt 補上這層，任何
-> agentic coding 工具（CI 修復 bot、IDE 插件）可直接 link。
+> tree-sitter-cpp parses, cpp-httplib sends HTTP, diffutils applies diffs mechanically.
+> **No existing C++ library closes the loop from compiler diagnostics to code
+> location to LLM patch to fuzzy apply to re-verify, and returns a structured
+> failure reason to the model.** FixIt provides that layer, so any agentic coding
+> tool (a CI repair bot, an IDE plugin) can link it directly.
 
 Concretely, `libfixit` is an ordinary CMake target with a header-only-style surface
 (`include/fixit/*.h`), no globals and no CLI dependency: `add_subdirectory` and link
